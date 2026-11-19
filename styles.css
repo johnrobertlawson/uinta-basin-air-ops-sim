@@ -1,0 +1,591 @@
+/* ============================================================================
+   KVEL & UINTA BASIN AIR OPERATIONS SIMULATOR — DLR-INSPIRED SIGNALLING THEME
+   Adheres to modern-web-guidance:
+   - persistent-toast-notifications (popover="manual", :is(:popover-open, .\:popover-open),
+     separate transition-behavior: allow-discrete, prefers-reduced-motion, WCAG 1.4.4/1.4.10/1.4.12)
+   - interactions-in-complex-layouts (content-visibility: auto + contain-intrinsic-size + @supports fallback)
+   - dialog (dialog:modal & ::backdrop overscroll-behavior: contain; scoped dialog[open])
+   ============================================================================ */
+
+:root {
+  --bg-deep: #070b12;
+  --bg-panel: #0d1421;
+  --bg-card: #131d2f;
+  --bg-elevated: #1a273e;
+  --border-dim: #243452;
+  --border-bright: #3b5380;
+  --text-main: #e8f0fe;
+  --text-muted: #93a8c9;
+  --accent-cyan: #22d3ee;
+  --accent-amber: #f59e0b;
+  --accent-emerald: #10b981;
+  --accent-crimson: #ef4444;
+  --accent-purple: #a855f7;
+  --accent-blue: #3b82f6;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-deep);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  line-height: 1.45;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.inclusively-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Top Signalling Telemetry Header */
+.sim-header {
+  background: linear-gradient(180deg, #0f192b 0%, #0a111d 100%);
+  border-bottom: 1px solid var(--border-dim);
+  padding: 0.55rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.dlr-badge {
+  background: #064e3b;
+  color: #6ee7b7;
+  border: 1px solid #10b981;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.brand-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-subtitle {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.telemetry-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.clock-box {
+  background: #05080e;
+  border: 1px solid var(--border-bright);
+  padding: 0.25rem 0.65rem;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.clock-time {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+}
+
+.speed-controls {
+  display: flex;
+  gap: 0.25rem;
+}
+
+/* Buttons */
+.btn {
+  background: var(--bg-elevated);
+  color: var(--text-main);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.btn:hover, .btn:focus-visible {
+  background: #243554;
+  border-color: var(--accent-cyan);
+}
+
+.btn.active {
+  background: #0e7490;
+  border-color: var(--accent-cyan);
+  color: #ffffff;
+}
+
+.btn-amber {
+  background: #78350f;
+  border-color: var(--accent-amber);
+  color: #fef3c7;
+}
+
+.btn-emerald {
+  background: #064e3b;
+  border-color: var(--accent-emerald);
+  color: #d1fae5;
+}
+
+.btn-crimson {
+  background: #7f1d1d;
+  border-color: var(--accent-crimson);
+  color: #fee2e2;
+}
+
+/* AWOS-3PT Live METAR Bar */
+.metar-bar {
+  background: #060a10;
+  border-bottom: 1px solid var(--border-dim);
+  padding: 0.4rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.metar-string {
+  color: #a7f3d0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.flight-cat-badge {
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  font-weight: 700;
+  font-size: 0.72rem;
+}
+
+.cat-VFR { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
+.cat-MVFR { background: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; }
+.cat-IFR { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; }
+.cat-LIFR { background: #581c87; color: #e9d5ff; border: 1px solid #a855f7; }
+
+/* Role & View Switcher Navigation Bar */
+.role-nav-bar {
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-dim);
+  padding: 0.45rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.role-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.role-tab {
+  background: var(--bg-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border-dim);
+  padding: 0.4rem 0.75rem;
+  border-radius: 5px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.role-tab[aria-selected="true"] {
+  background: #164e63;
+  color: #ffffff;
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.3);
+}
+
+/* Main Dashboard Workspace Grid */
+.workspace-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(340px, 1fr);
+  gap: 0.75rem;
+  padding: 0.75rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Modern Web Guidance: interactions-in-complex-layouts */
+.board-column {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 420px auto 720px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+@supports not (content-visibility: auto) {
+  .board-column {
+    contain: layout style paint;
+  }
+}
+
+.panel-header {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-dim);
+  padding: 0.55rem 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-cyan);
+}
+
+/* DLR Signalling & Basin Radar Canvases */
+.diagrams-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  padding: 0.65rem;
+}
+
+.diagrams-container.split-view {
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+}
+
+.schematic-box {
+  background: #050911;
+  border: 1px solid #1d2d47;
+  border-radius: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+.schematic-caption {
+  background: rgba(13, 20, 33, 0.92);
+  border-bottom: 1px solid #1d2d47;
+  padding: 0.35rem 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.schematic-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+}
+
+/* Signalling Block Status Legend */
+.signal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 4px;
+}
+
+/* Role Workstation Cards & Tables */
+.role-desk-body {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.role-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-dim);
+  border-radius: 5px;
+  padding: 0.7rem;
+}
+
+.role-card h3 {
+  margin: 0 0 0.45rem 0;
+  font-size: 0.86rem;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.flight-table-wrap {
+  overflow-x: auto;
+}
+
+.sim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  font-family: var(--font-mono);
+}
+
+.sim-table th,
+.sim-table td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.sim-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.sim-table tr:hover {
+  background: rgba(34, 211, 238, 0.07);
+}
+
+.sim-table tr.selected-row {
+  background: rgba(34, 211, 238, 0.16);
+  outline: 1px solid var(--accent-cyan);
+}
+
+.state-pill {
+  display: inline-block;
+  padding: 0.12rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.state-BOARDING, .state-PARKED { background: #1e293b; color: #cbd5e1; border: 1px solid #475569; }
+.state-TAXI_OUT, .state-TAXI_IN, .state-HOLD_SHORT { background: #78350f; color: #fde68a; border: 1px solid #f59e0b; }
+.state-TAKEOFF, .state-ENROUTE, .state-PATTERN { background: #064e3b; color: #a7f3d0; border: 1px solid #10b981; }
+.state-APPROACH, .state-LANDING { background: #1e3a8a; color: #bfdbfe; border: 1px solid #3b82f6; }
+.state-EMERGENCY { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; animation: pulseRed 1.2s infinite; }
+
+@keyframes pulseRed {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+/* Radio Log List inside Sidebar */
+.radio-log-feed {
+  max-height: 230px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+}
+
+.radio-entry {
+  background: #080d17;
+  border-left: 3px solid var(--accent-cyan);
+  padding: 0.4rem 0.55rem;
+  border-radius: 0 4px 4px 0;
+}
+
+.radio-entry.freq-guard { border-left-color: var(--accent-crimson); background: #1a0b10; }
+.radio-entry.freq-zlc { border-left-color: var(--accent-purple); }
+.radio-entry.freq-fbo { border-left-color: var(--accent-amber); }
+
+.freq-chip {
+  display: inline-block;
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: #162338;
+  color: var(--accent-cyan);
+  margin-right: 0.35rem;
+}
+
+/* ============================================================================
+   Modern Web Guidance: persistent-toast-notifications
+   Unobtrusive Written Radio Call Popover Stack
+   ============================================================================ */
+.radio-toast-region {
+  position: fixed;
+  inset: auto 1rem 1rem auto;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(410px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.radio-toast[popover] {
+  position: relative;
+  inset: auto;
+  margin: 0;
+  width: 100%;
+  background: rgba(11, 19, 32, 0.96);
+  color: var(--text-main);
+  border: 1px solid var(--accent-cyan);
+  border-left: 4px solid var(--accent-cyan);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.65);
+  pointer-events: auto;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease, display 0.2s ease;
+  /* MANDATORY per persistent-toast-notifications: separate property after transition */
+  transition-behavior: allow-discrete;
+}
+
+/* MANDATORY per persistent-toast-notifications: combine :popover-open and .\:popover-open */
+.radio-toast[popover]:is(:popover-open, .\:popover-open) {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Fallback stacking spacing if flex gap isn't triggering on top-layer popovers */
+.radio-toast[popover] + .radio-toast[popover] {
+  margin-top: 0.5rem;
+}
+
+.radio-toast.toast-guard {
+  border-color: var(--accent-crimson);
+  border-left-color: var(--accent-crimson);
+  background: rgba(34, 10, 15, 0.96);
+}
+
+.radio-toast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.radio-toast-close {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-dim);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.radio-toast-close:hover,
+.radio-toast-close:focus-visible {
+  color: #ffffff;
+  border-color: var(--accent-cyan);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radio-toast[popover] {
+    transition: none;
+    transform: none;
+  }
+  .state-EMERGENCY {
+    animation: none;
+  }
+}
+
+/* ============================================================================
+   Modern Web Guidance: dialog
+   Modal Dialogs for Briefing / Airport Directory & Manual Radio Transmission
+   ============================================================================ */
+dialog[open] {
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 8px;
+  padding: 1.15rem;
+  max-width: min(720px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+}
+
+/* MANDATORY per dialog guide: prevent scroll chaining to page behind modal */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  background: rgba(3, 7, 15, 0.75);
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+
+/* WCAG 1.4.10 Reflow (320x256 viewport support) */
+@media (max-width: 480px) {
+  .sim-header, .metar-bar, .role-nav-bar {
+    padding: 0.4rem 0.5rem;
+  }
+  .radio-toast-region {
+    inset: auto 0.4rem 0.4rem 0.4rem;
+    max-width: calc(100vw - 0.8rem);
+  }
+}

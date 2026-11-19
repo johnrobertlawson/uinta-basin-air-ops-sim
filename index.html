@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KVEL &amp; Uinta Basin Air Ops Simulator — Ashley Valley Signalling &amp; Multi-Role Sim</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Screen-reader live region fallback for ariaNotify() -->
+  <p class="inclusively-hidden">Screen reader announcements</p>
+  <div id="srAnnouncement" aria-live="polite" class="inclusively-hidden"></div>
+
+  <!-- Top Signalling Telemetry Header -->
+  <header class="sim-header">
+    <div class="brand-group">
+      <span class="dlr-badge">KVEL • BASIN OPS v0.1.0</span>
+      <div>
+        <h1 class="brand-title">Uinta Basin &amp; Ashley Valley Air Operations Simulator</h1>
+        <p class="brand-subtitle">DLR-Style Signalling &amp; Airspace Board • Home: Vernal Regional (KVEL, 5,281' MSL)</p>
+      </div>
+    </div>
+
+    <div class="telemetry-strip">
+      <div class="clock-box" aria-label="Simulation Clock">
+        <span id="simClock" class="clock-time">07:05 MST</span>
+        <div class="speed-controls" role="group" aria-label="Simulation Speed">
+          <button type="button" class="btn" data-speed="0">PAUSE</button>
+          <button type="button" class="btn active" data-speed="1">1x</button>
+          <button type="button" class="btn" data-speed="4">4x</button>
+          <button type="button" class="btn" data-speed="15">15x</button>
+          <button type="button" class="btn" id="resetSimBtn" title="Reset simulation state">↺</button>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-amber" id="triggerScenarioBtn">⚡ Trigger Basin Event</button>
+      <button type="button" class="btn" command="show-modal" commandfor="airportDialog" id="openDirectoryBtn">📋 Basin Directory &amp; Comms</button>
+    </div>
+  </header>
+
+  <!-- Live KVEL AWOS-3PT (135.225) & Past-Month Weather Selector -->
+  <section class="metar-bar" aria-label="KVEL Weather and AWOS">
+    <div class="metar-string">
+      <span id="flightCatBadge" class="flight-cat-badge cat-LIFR">LIFR</span>
+      <span><strong>AWOS 135.225:</strong> <span id="metarText"></span></span>
+      <span style="color: var(--accent-amber);" id="methaneBadge"></span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;">
+      <label for="weatherSelect" style="color: var(--text-muted);">Past-Month Basin Wx:</label>
+      <select id="weatherSelect" class="btn" style="font-family: var(--font-mono);">
+        <option value="inversion_fog">Nov Cold-Pool &amp; Freezing Fog (LIFR)</option>
+        <option value="uinta_cold_front">Uinta Front &amp; 35kt Crosswinds (MVFR)</option>
+        <option value="crisp_high_pressure">Crisp Frosty High-Pressure (-7°C VFR)</option>
+        <option value="mild_basin_vfr">Sunny Basin Patrol &amp; Training (VFR)</option>
+      </select>
+      <label style="display: inline-flex; align-items: center; gap: 0.25rem; color: var(--text-muted); cursor: pointer;">
+        <input type="checkbox" id="radioPopupsToggle" checked> Radio Popups
+      </label>
+    </div>
+  </section>
+
+  <!-- Role & View Switcher Bar -->
+  <nav class="role-nav-bar" aria-label="Role and Display Selection">
+    <div class="role-tabs" role="tablist" aria-label="Simulator Roles">
+      <button type="button" class="role-tab" role="tab" aria-selected="true" data-role="armchair">🪑 Armchair AI Director</button>
+      <button type="button" class="role-tab" role="tab" aria-selected="false" data-role="dispatcher">📡 Flight Dispatcher</button>
+      <button type="button" class="role-tab" role="tab" aria-selected="false" data-role="fbo">🚜 FBO &amp; Ramp Agent</button>
+      <button type="button" class="role-tab" role="tab" aria-selected="false" data-role="tsa">🛂 TSA &amp; Ticketing</button>
+      <button type="button" class="role-tab" role="tab" aria-selected="false" data-role="pilot">✈️ Pilot Command</button>
+    </div>
+
+    <div style="display: flex; gap: 0.35rem; align-items: center;">
+      <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">MAP:</span>
+      <button type="button" class="btn active" data-view="split">Dual Split</button>
+      <button type="button" class="btn" data-view="kvel">Ashley Valley / KVEL</button>
+      <button type="button" class="btn" data-view="basin">Uinta Basin Radar</button>
+    </div>
+  </nav>
+
+  <!-- Main Workspace -->
+  <main class="workspace-grid">
+    <!-- Left Board Column: DLR Signalling & Basin Airspace Views + Active Traffic Board -->
+    <section class="board-column" aria-label="Signalling Diagrams and Traffic Board">
+      <div class="panel-header">
+        <h2 class="panel-title">Live Signalling &amp; Airspace Track</h2>
+        <div class="signal-legend" aria-label="Block Occupancy Legend">
+          <span><span class="legend-dot" style="background:#10b981;"></span>Clear</span>
+          <span><span class="legend-dot" style="background:#f59e0b;"></span>Reserved/Approach</span>
+          <span><span class="legend-dot" style="background:#ef4444;"></span>Occupied</span>
+          <span><span class="legend-dot" style="background:#a855f7;"></span>Closed/Wildlife/De-Ice</span>
+        </div>
+      </div>
+
+      <div id="diagramsContainer" class="diagrams-container split-view">
+        <!-- View A: High-Detail Ashley Valley & KVEL DLR Signalling Diagram -->
+        <div id="kvelSchematicBox" class="schematic-box">
+          <div class="schematic-caption">
+            <span><strong>KVEL ASHLEY VALLEY SIGNALLING BOARD</strong> • RWY 17/35 (6,198'×100')</span>
+            <span style="color: var(--accent-cyan);">CTAF 122.800 • FBO 129.450</span>
+          </div>
+          <svg id="kvelSvg" class="schematic-svg" viewBox="0 0 920 565" role="img" aria-label="Ashley Valley and Vernal Regional Airport KVEL DLR-style signalling diagram"></svg>
+        </div>
+
+        <!-- View B: Uinta Basin & Regional Airspace Radar -->
+        <div id="basinRadarBox" class="schematic-box">
+          <div class="schematic-caption">
+            <span><strong>UINTA BASIN AIRSPACE &amp; PORTALS</strong> • 74V • U69 • 33U • 4V0 • PUC/RKS/GJT/SPK</span>
+            <span style="color: var(--accent-purple);">ZLC 135.775 • GUARD 121.500</span>
+          </div>
+          <svg id="basinSvg" class="schematic-svg" viewBox="0 0 1000 620" role="img" aria-label="Uinta Basin regional airspace radar showing local airstrips, helipads, and off-map portals"></svg>
+        </div>
+      </div>
+
+      <!-- Active Basin Flights Table -->
+      <div style="padding: 0 0.65rem 0.65rem 0.65rem;">
+        <div class="role-card">
+          <h3>
+            <span>Active Operations Strip Board (Click any flight to inspect / command)</span>
+            <span id="opsCountBadge" style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent-cyan);"></span>
+          </h3>
+          <div class="flight-table-wrap">
+            <table class="sim-table">
+              <thead>
+                <tr>
+                  <th>Callsign / Tail</th>
+                  <th>Equipment &amp; Role</th>
+                  <th>Route</th>
+                  <th>Status / Block</th>
+                  <th>Alt / Spd</th>
+                  <th>Sqk / Freq</th>
+                </tr>
+              </thead>
+              <tbody id="flightTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Board Column: Active Role Workstation + Persistent Radio Transcript Log -->
+    <aside class="board-column" aria-label="Role Workstation and Radio Log">
+      <div class="panel-header">
+        <h2 id="rolePanelTitle" class="panel-title">Armchair Mode — Autonomous AI Director</h2>
+        <span id="roleAiBadge" class="dlr-badge" style="font-size:0.68rem;">AI AUTO: ON</span>
+      </div>
+
+      <div id="roleDeskBody" class="role-desk-body"></div>
+
+      <!-- Persistent Radio Transcript Log (ensures toast info is permanently accessible) -->
+      <div style="padding: 0 0.75rem 0.75rem 0.75rem;">
+        <div class="role-card">
+          <h3>
+            <span>📻 Radio Transcript Log (CTAF / ZLC / FBO / Guard)</span>
+            <button type="button" class="btn" id="clearLogBtn" style="font-size:0.7rem; padding: 0.15rem 0.45rem;">Clear</button>
+          </h3>
+          <div id="radioLogFeed" class="radio-log-feed" aria-label="Persistent radio communication history"></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Unobtrusive Written Radio Call Popover Toast Region -->
+  <div id="radioToastRegion" class="radio-toast-region" role="region" aria-label="Radio Transmissions"></div>
+
+  <!-- Native Modal Dialog: Basin Airport Directory & Weather Briefing -->
+  <dialog id="airportDialog" aria-labelledby="airportDialogTitle" closedby="any">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:0.75rem;">
+      <h2 id="airportDialogTitle" style="margin:0; font-size:1.05rem; color: var(--accent-cyan);">Uinta Basin Airports, Helipads &amp; Off-Map Portals</h2>
+      <form method="dialog">
+        <button type="submit" value="close" class="btn" autofocus>Close</button>
+      </form>
+    </div>
+    <p id="wxBriefingNote" style="font-size:0.82rem; color: var(--text-muted); margin-top:0;"></p>
+    <div id="airportDirectoryList" class="flight-table-wrap"></div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
