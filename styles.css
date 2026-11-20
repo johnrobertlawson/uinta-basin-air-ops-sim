@@ -78,6 +78,12 @@ button, select, summary { cursor: pointer; }
 .speed-controls .btn:not(.active), .map-picker .btn:not(.active) { color: var(--text-muted); }
 .btn[aria-disabled="true"] { color: #94a7ae; border-color: var(--line); background: none; cursor: default; }
 .text-button, .radio-toast-close { color: var(--accent-cyan); padding: .25rem .05rem; font-size: .8rem; font-weight: 600; }
+.quiet-prompt { position: fixed; left: var(--edge); bottom: 1rem; z-index: 2; max-width: min(22rem, calc(100% - 2 * var(--edge)));
+  padding: .75rem .9rem; border: 1px solid var(--rule); border-left: 3px solid var(--accent-cyan);
+  background: var(--panel); box-shadow: 0 .35rem 1.3rem #0008; }
+.quiet-prompt strong { font-size: .9rem; }
+.quiet-prompt p { margin: .12rem 0 .55rem; font-size: .82rem; color: var(--text-muted); }
+body:has(dialog[open]) .quiet-prompt { display: none; }
 .conditions-bar {
   display: grid; grid-template-columns: minmax(7rem, .8fr) minmax(0, 5fr);
   align-items: center; padding-block: .72rem; border-bottom: 1px solid var(--line);
@@ -100,6 +106,17 @@ button, select, summary { cursor: pointer; }
 .cat-MVFR { color: #89bcff; }
 .cat-IFR { color: #ff928e; }
 .cat-LIFR { color: #e2a9f7; }
+.director-modes, .radar-layers { border: 0; padding: 0; margin: 0; min-width: 0; }
+.director-modes legend, .radar-layers legend, .map-key strong {
+  font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
+}
+.director-modes label {
+  display: inline-flex; align-items: center; gap: .4rem; margin: .45rem .25rem .45rem 0;
+  padding: .35rem .62rem; border: 1px solid var(--rule); font-size: .86rem; cursor: pointer;
+}
+.director-modes label:has(:checked) { background: var(--selection); color: var(--accent-cyan); border-color: var(--accent-cyan); }
+.director-modes input, .radar-layers input { margin: 0; }
+#directorPanel { border-bottom: 1px solid var(--line); }
 .role-nav-bar { border-bottom: 1px solid var(--line); }
 .role-tabs { gap: clamp(.35rem, 1.5vw, 1.65rem); flex-wrap: wrap; }
 .role-tab { padding: .8rem .12rem .7rem; border-bottom: 2px solid transparent; font-size: .88rem; color: var(--text-muted); font-weight: 600; }
@@ -163,6 +180,40 @@ select.btn { background: var(--panel); }
   padding: .52rem 1rem; font-size: .8rem; color: var(--text-muted);
 }
 .schematic-caption strong { font-weight: 550; color: var(--text-main); }
+.map-picker { flex-wrap: wrap; }
+.map-picker .expand-map { margin-left: .3rem; padding-inline: .65rem; border-color: var(--rule); color: var(--text-main); }
+.radar-caption { border-bottom: 1px solid var(--line); }
+.radar-heading-actions { display: none; }
+.radar-tools { display: flex; flex-wrap: wrap; align-items: baseline; gap: .55rem 1rem; padding: .65rem 1rem; border-top: 1px solid var(--line); }
+.radar-scenario { display: inline-flex; align-items: center; gap: .5rem; font-size: .82rem; font-weight: 600; }
+.radar-scenario select { max-width: 100%; }
+.radar-outlook { color: var(--text-muted); font-size: .82rem; }
+.radar-layers { display: flex; flex-wrap: wrap; gap: .22rem .85rem; }
+.radar-layers label { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; cursor: pointer; }
+.radar-layers legend { margin-bottom: .3rem; }
+.map-key { display: flex; flex-wrap: wrap; align-items: center; gap: .2rem .65rem; }
+.map-key strong { font-size: .65rem; }
+.echo-key span { display: inline-flex; align-items: center; gap: .28rem; font-size: .74rem; }
+.echo-key span::before { content: ""; width: .9rem; height: .36rem; background: currentColor; }
+.echo-light { color: #69cfa2; }
+.echo-moderate { color: #e4bf68; }
+.echo-strong { color: #f29173; }
+.weather-overlay { pointer-events: none; }
+.wx-returns { fill-opacity: .39; }
+.echo-fill-light { fill: #4ca882; }
+.echo-fill-moderate { fill: #e4bf68; }
+.echo-fill-strong { fill: #f29173; }
+.wx-contours { fill: none; stroke-width: 1.7; vector-effect: non-scaling-stroke; }
+.echo-line-light { stroke: #69cfa2; }
+.echo-line-moderate { stroke: #e4bf68; }
+.echo-line-strong { stroke: #f29173; }
+.ice-footprint { fill: url(#ice-hatch); stroke: #94d1f4; stroke-width: 1.5; }
+.hazard-footprint { fill: #d5ae61; fill-opacity: .12; stroke: #dcba76; stroke-width: 1.75; stroke-dasharray: 6 4; }
+.wx-label { font-size: 14px; font-weight: 650; paint-order: stroke; stroke: var(--chart); stroke-width: 3px; stroke-linejoin: round; }
+.wx-icing .wx-label { fill: #bce6ff; }
+.wx-hazards .wx-label { fill: #f2d292; }
+.schematic-svg:not(.has-icing-report) .reported-icing, .hide-returns .wx-returns, .hide-contours .wx-contours,
+.hide-icing .wx-icing, .hide-hazards .wx-hazards, .hide-traffic .radar-traffic { visibility: hidden; }
 .map-viewport { overflow-x: auto; background: var(--chart); }
 .schematic-svg { display: block; width: 100%; min-width: 34rem; height: auto; user-select: none; }
 .airfield-detail { min-width: 0; height: clamp(19rem, 44vh, 32rem); }
@@ -210,7 +261,44 @@ dialog[open] {
 }
 dialog:modal, dialog::backdrop { overscroll-behavior: contain; }
 dialog::backdrop { background: rgb(3 9 12 / .8); }
+body:has(#radarDialog[open]) { overflow: hidden; }
+#radarDialog[open] { inset: 0; width: 100%; height: 100%; max-height: none; margin: 0; border: 0; }
+#radarDialog #basinRadarBox {
+  display: flex; flex-direction: column; width: 100%; height: 100%; background: var(--chart); overflow: auto;
+}
+#radarDialog .radar-caption { padding: .7rem var(--edge); background: var(--panel); }
+#radarDialog .radar-caption strong { color: var(--accent-cyan); font-size: 1.15rem; }
+#radarDialog .radar-heading-actions { display: flex; align-items: center; gap: .65rem; }
+#radarDialog .radar-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 14rem; }
+#radarDialog .map-viewport { min-width: 0; min-height: 0; }
+#radarDialog .schematic-svg { min-width: 0; width: 100%; height: 100%; }
+#radarDialog .radar-zoomed .schematic-svg { width: max(55rem, 165%); height: auto; min-height: 100%; }
+#radarDialog .radar-tools { display: flex; flex-flow: column nowrap; align-items: stretch; gap: .8rem; overflow: auto;
+  padding: 1.2rem 1rem; background: var(--panel); border: 0; border-left: 1px solid var(--line); }
+#radarDialog .radar-scenario { align-items: stretch; flex-direction: column; }
+#radarDialog .radar-layers { flex-direction: column; gap: .6rem; padding-block: .25rem; }
+#radarDialog .map-key { padding-top: .75rem; border-top: 1px solid var(--line); }
+#radarDialog .map-key strong { flex-basis: 100%; margin-bottom: .25rem; }
+@media (max-width: 720px) and (orientation: portrait) {
+  #radarDialog .radar-layout { display: flex; flex-direction: column; }
+  #radarDialog .map-viewport { flex: 1 1 0; min-height: 38vh; }
+  #radarDialog .radar-tools { flex: 0 1 auto; max-height: 45vh; gap: .45rem; padding: .65rem .85rem; border: 0; border-top: 1px solid var(--line); }
+  #radarDialog .radar-scenario, #radarDialog .radar-layers { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  #radarDialog .map-key { padding: .25rem 0 0; }
+  #radarDialog .map-key strong { flex-basis: auto; margin: 0; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #radarDialog .radar-layout { grid-template-columns: minmax(0, 1fr) 11.5rem; }
+  #radarDialog .radar-tools { padding: .65rem; }
+}
 .weather-control { flex-wrap: wrap; gap: .5rem; }
+.sound-preview { margin-top: .5rem; }
+.sound-mix { display: grid; gap: .6rem; }
+.sound-mix label { display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
+.sound-mix input { margin: 0; }
+#soundLevel { width: min(13rem, 65%); }
+#soundDialog { max-width: 28rem; }
+#soundStatus:not(:empty) { margin-top: .65rem; }
 #wxBriefingNote, .weather-report, #methaneBadge { margin-top: .6rem; }
 .weather-report strong { color: var(--text-main); }
 @media (min-width: 1500px) {

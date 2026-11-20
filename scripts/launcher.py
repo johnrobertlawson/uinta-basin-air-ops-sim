@@ -19,10 +19,10 @@ STATE_DIR = Path.home() / ".cache" / "uinta-basin-air-ops-sim"
 PORT_FILE = STATE_DIR / "server.port"
 
 
-def server_alive(port: int) -> bool:
+def server_alive(port: int, version: str) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/VERSION", timeout=0.6) as resp:
-            return resp.status == 200
+            return resp.status == 200 and resp.read(80).decode().strip() == version
     except Exception:
         return False
 
@@ -54,7 +54,7 @@ def main() -> int:
     if PORT_FILE.is_file():
         try:
             existing_port = int(PORT_FILE.read_text().strip())
-            if server_alive(existing_port):
+            if server_alive(existing_port, (web_dir / "VERSION").read_text().strip()):
                 webbrowser.open(f"http://127.0.0.1:{existing_port}/")
                 return 0
         except Exception:

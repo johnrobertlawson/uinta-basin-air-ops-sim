@@ -13,19 +13,20 @@
   <header class="sim-header page-edge">
     <div class="brand-group">
       <h1><span class="wordmark">Uinta Basin</span> <span class="product-name">Air Ops Sim</span></h1>
-      <span class="version">v0.1.0</span>
+      <span class="version">v0.2.0</span>
     </div>
     <div class="telemetry-strip">
-      <time id="simClock" class="clock-time" aria-label="Simulation clock">07:05 MST</time>
+      <time id="simClock" class="clock-time" aria-label="Simulation clock">07:05:00 MST</time>
       <div class="speed-controls" role="group" aria-label="Simulation speed">
         <button type="button" class="btn" data-speed="0">Pause</button>
+        <button type="button" class="btn" data-speed="0.5">0.5×</button>
         <button type="button" class="btn active" data-speed="1">1×</button>
-        <button type="button" class="btn" data-speed="4">4×</button>
-        <button type="button" class="btn" data-speed="15">15×</button>
+        <button type="button" class="btn" data-speed="5">5×</button>
         <button type="button" class="btn" id="resetSimBtn" title="Reset simulation">Reset</button>
       </div>
       <button type="button" class="btn" id="triggerScenarioBtn">Trigger event</button>
       <button type="button" class="btn" command="show-modal" commandfor="airportDialog" id="openDirectoryBtn">Basin briefing</button>
+      <button type="button" class="btn" id="openSoundBtn" aria-haspopup="dialog" aria-controls="soundDialog">Sound</button>
     </div>
   </header>
 
@@ -52,6 +53,7 @@
           <button type="button" class="btn" data-view="kvel">Airfield</button>
           <button type="button" class="btn" data-view="basin">Radar</button>
           <button type="button" class="btn active" data-view="split">Split</button>
+          <button type="button" class="btn expand-map" id="openRadarMap" aria-haspopup="dialog" aria-controls="radarDialog">Full-screen map</button>
         </div>
       </div>
       <div id="diagramsContainer" class="diagrams-container split-view">
@@ -73,9 +75,38 @@
           </div>
         </div>
         <div id="basinRadarBox" class="schematic-box">
-          <div class="schematic-caption"><strong>Uinta Basin · Regional radar</strong><span>ZLC 135.775 · Guard 121.500</span></div>
-          <div class="map-viewport" tabindex="0" role="region" aria-label="Regional radar diagram">
-            <svg id="basinSvg" class="schematic-svg" viewBox="0 0 1000 620" role="img" aria-label="Uinta Basin radar showing aircraft, local airstrips, helipads and off-map portals"></svg>
+          <div class="schematic-caption radar-caption">
+            <strong id="radarTitle">Uinta Basin · Regional radar</strong>
+            <div class="radar-heading-actions">
+              <time id="radarClock" class="clock-time"></time>
+              <button type="button" class="btn" id="radarZoom" aria-pressed="false">Zoom in</button>
+              <button type="button" class="btn" id="closeRadarMap">Exit full screen</button>
+            </div>
+          </div>
+          <div class="radar-layout">
+            <div class="map-viewport" tabindex="0" role="region" aria-label="Regional weather and traffic diagram">
+              <svg id="basinSvg" class="schematic-svg" viewBox="0 0 1000 620" role="img" aria-label="Uinta Basin schematic with simulated weather, airport flight categories and aircraft"></svg>
+            </div>
+            <div class="radar-tools">
+              <label class="radar-scenario">Simulated weather <select id="radarWeatherSelect" class="btn"></select></label>
+              <p class="radar-outlook" id="radarOutlook"></p>
+              <fieldset class="radar-layers"><legend>Map layers</legend>
+                <label><input type="checkbox" data-layer="returns" checked> Radar returns</label>
+                <label><input type="checkbox" data-layer="contours" checked> Storm contours</label>
+                <label><input type="checkbox" data-layer="icing" checked> Icing</label>
+                <label><input type="checkbox" data-layer="hazards" checked> Weather hazards</label>
+                <label><input type="checkbox" data-layer="traffic" checked> Aircraft</label>
+              </fieldset>
+              <div class="map-key" aria-label="Airport flight categories">
+                <strong>Flight categories</strong>
+                <span class="flight-category cat-VFR">VFR</span><span class="flight-category cat-MVFR">MVFR</span>
+                <span class="flight-category cat-IFR">IFR</span><span class="flight-category cat-LIFR">LIFR</span>
+              </div>
+              <div class="map-key echo-key" aria-label="Simulated radar reflectivity">
+                <strong>Reflectivity · dBZ</strong>
+                <span class="echo-light">15</span><span class="echo-moderate">25</span><span class="echo-strong">35</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -93,6 +124,15 @@
 
     <aside class="board-column" id="workstation" aria-labelledby="rolePanelTitle">
       <div class="panel-header"><h2 id="rolePanelTitle" class="panel-title">Armchair Director</h2><span id="roleAiBadge" class="panel-meta"></span></div>
+      <section id="directorPanel" class="board-section">
+        <fieldset class="director-modes">
+          <legend>Automatic problem handling</legend>
+          <label><input type="radio" name="directorPace" value="off"> Off</label>
+          <label><input type="radio" name="directorPace" value="gradual" checked> Fix gradually</label>
+          <label><input type="radio" name="directorPace" value="immediate"> Fix immediately</label>
+        </fieldset>
+        <p id="directorStatus" class="desk-copy"></p>
+      </section>
       <div id="roleDeskBody" class="role-desk-body"></div>
       <section id="dispatchPanel" class="board-section" aria-labelledby="stripsTitle" hidden>
         <h3 id="stripsTitle" class="section-label">Flight strips</h3>
@@ -121,6 +161,36 @@
     </aside>
   </main>
   <div id="radioToastRegion" class="radio-toast-region" role="region" aria-label="Radio transmissions"></div>
+  <aside id="quietPrompt" class="quiet-prompt" aria-labelledby="quietTitle" hidden>
+    <strong id="quietTitle">Quiet stretch</strong>
+    <p id="quietDetail"></p>
+    <div class="action-row">
+      <button type="button" id="skipQuiet" class="btn">Skip ahead</button>
+      <button type="button" id="stayQuiet" class="text-button">Keep watching</button>
+    </div>
+  </aside>
+  <dialog id="radarDialog" aria-label="Full-screen Uinta Basin weather map"></dialog>
+  <dialog id="soundDialog" aria-labelledby="soundTitle" closedby="any">
+    <div class="panel-header">
+      <h2 id="soundTitle" class="panel-title">Sound</h2>
+      <form method="dialog"><button type="submit" class="btn">Close</button></form>
+    </div>
+    <div class="board-section">
+      <h3 class="section-label">Voice preview</h3>
+      <div class="action-row sound-preview">
+        <button type="button" class="btn" id="previewPilot">Play pilot call</button>
+        <button type="button" class="btn" id="previewWeather">Play METAR</button>
+        <button type="button" class="text-button" id="stopVoice">Stop playback</button>
+      </div>
+      <p class="desk-copy" id="soundStatus" role="status"></p>
+    </div>
+    <div class="board-section sound-mix">
+      <label><input type="checkbox" id="voiceToggle"> Speak radio transmissions</label>
+      <label><input type="checkbox" id="cueToggle"> Soft desk and radio cues</label>
+      <label><input type="checkbox" id="roomToggle"> Gate and checkpoint ambience</label>
+      <label>Volume <input type="range" id="soundLevel" min="0" max="100" value="60"></label>
+    </div>
+  </dialog>
   <dialog id="airportDialog" aria-labelledby="airportDialogTitle" closedby="any">
     <div class="panel-header">
       <h2 id="airportDialogTitle" class="panel-title">Basin briefing</h2>

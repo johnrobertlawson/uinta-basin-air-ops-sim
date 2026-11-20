@@ -247,11 +247,17 @@ export const KVEL_BLOCKS = [
 // WEATHER SCENARIOS (INSPIRED BY PAST-MONTH OCT/NOV UINTA BASIN METEOROLOGY)
 // Integrates with USU Bingham Research Center snow-depth/inversion dynamics
 // ============================================================================
-// Nearby categories are fixed scenario values for the conditions display.
+// All categories and weather-map depictions belong to the simulated scenario.
+export function airportCategory(weather, code) {
+  return code === "KVEL" ? weather.flightCategory : weather.nearbyCategories[code] ?? weather.regionalCategories[code];
+}
+
 export const WEATHER_REGIMES = [
   {
     id: "inversion_fog",
     nearbyCategories: { "74V": "IFR", "U69": "MVFR", "33U": "VFR", "4V0": "MVFR" },
+    regionalCategories: { KPUC: "VFR", KRKS: "VFR", KGJT: "VFR", KSPK: "MVFR" },
+    radarOutlook: "Freezing fog fills the valley floor. Rime is possible in the fog near Vernal. No precipitation echoes.",
     name: "Late-Autumn Basin Cold Pool & Freezing Fog",
     metar: "KVEL 181453Z AUTO 15003KT 1/2SM FZFG VV003 M04/M05 A3034 RMK AO2 FZRAE1418SLP298",
     tempC: -4,
@@ -271,6 +277,8 @@ export const WEATHER_REGIMES = [
   {
     id: "uinta_cold_front",
     nearbyCategories: { "74V": "MVFR", "U69": "IFR", "33U": "IFR", "4V0": "VFR" },
+    regionalCategories: { KPUC: "MVFR", KRKS: "IFR", KGJT: "VFR", KSPK: "MVFR" },
+    radarOutlook: "Snow showers track across the western approaches and the north rim. In-cloud icing and gusty crosswinds affect the basin.",
     name: "Uinta Mountain Cold Front & Gusty Crosswinds",
     metar: "KVEL 181953Z AUTO 26024G35KT 5SM -SHSN BKN026 OVC042 M01/M08 A2976 RMK AO2 PK WND 27035/1941",
     tempC: -1,
@@ -290,6 +298,8 @@ export const WEATHER_REGIMES = [
   {
     id: "crisp_high_pressure",
     nearbyCategories: { "74V": "VFR", "U69": "VFR", "33U": "VFR", "4V0": "VFR" },
+    regionalCategories: { KPUC: "VFR", KRKS: "VFR", KGJT: "VFR", KSPK: "VFR" },
+    radarOutlook: "Clear aloft. Surface frost at Vernal requires ramp de-icing. No precipitation echoes.",
     name: "Crisp High-Pressure Frosty Morning",
     metar: "KVEL 181553Z AUTO 34005KT 10SM FEW120 M07/M13 A3042 RMK AO2 SLP324 T10721128",
     tempC: -7,
@@ -309,6 +319,8 @@ export const WEATHER_REGIMES = [
   {
     id: "mild_basin_vfr",
     nearbyCategories: { "74V": "VFR", "U69": "VFR", "33U": "VFR", "4V0": "VFR" },
+    regionalCategories: { KPUC: "VFR", KRKS: "VFR", KGJT: "VFR", KSPK: "VFR" },
+    radarOutlook: "VFR across the basin. No precipitation echoes.",
     name: "Sunny Autumn Basin Patrol & Training Day",
     metar: "KVEL 182053Z AUTO 17008KT 10SM CLR 11/M04 A3018 RMK AO2 SLP215",
     tempC: 11,
@@ -723,56 +735,65 @@ export const PASSENGER_QUEUE = [
 export const DYNAMIC_SCENARIOS = [
   {
     id: "SCEN-METHANE",
+    voiceClip: "methane",
     title: "Ouray Cold-Pool Methane Spike & Low-Level Survey Alert",
     category: "Basin Science / GA Patrol",
     freq: "122.800",
     sender: "SKYLANE 248UB",
-    radioCall: "Vernal Traffic, Skylane 248UB at 5,800 over Leland Bench — laser spectrometer just spiked 18 ppm methane over Compressor Pad 14 under the inversion layer. Entering tight 500-foot orbit to pinpoint coordinate for ground crew.",
+    radioCall: "Vernal Traffic, Skylane 248UB over Leland Bench. Methane reading spiked over Compressor Pad 14. Ground crew requests a follow-up survey at Ouray.",
+    mission: { flightId: "N248UB", dest: "LZ-OURAY", speedKt: 115, targetAltFt: 5700, task: "Ouray plume survey" },
     effect: "Places N248UB in low-altitude holding orbit at LZ-OURAY; cautions southbound departures off KVEL Rwy 17."
   },
   {
     id: "SCEN-7700-ICING",
+    voiceClip: "pilot",
     title: "SQUAWK 7700: Severe Airframe Icing over Daniels Summit",
     category: "Emergency / Divert",
     freq: "121.500",
     sender: "BONANZA 842K ( via ZLC 135.775 )",
-    radioCall: "MAYDAY MAYDAY MAYDAY, Salt Lake Center, Bonanza 842 Kilo at 11,500 over Strawberry / Daniels Summit picking up rapid mixed rime ice, unable to maintain altitude, requesting immediate vector to Duchesne U69 or Vernal KVEL!",
+    radioCall: "Mayday, Mayday, Mayday. Salt Lake Center, Bonanza 842 Kilo at 11,500 over Daniels Summit. Picking up rapid mixed ice, unable to maintain altitude. Requesting a vector to Duchesne or Vernal.",
     effect: "Spawns emergency aircraft BONANZA 842K squawking 7700 inbound from West Portal; requires priority Runway 35 clearance & ARFF standby at KVEL."
   },
   {
     id: "SCEN-DEER-RWY",
+    voiceClip: "wildlife",
     title: "Mule Deer Herd on KVEL Runway 35 Threshold",
     category: "Surface / FBO Ops",
     freq: "122.800",
     sender: "VERNAL AIRPORT OPS (OPS-1)",
-    radioCall: "Vernal Traffic, Airport Ops 1 on CTAF — six mule deer jumped the southeast perimeter fence near Ashley Creek and are crossing the Runway 35 threshold numbers. Closing Runway 17/35 for 5-minute wildlife sweep!",
+    radioCall: "Vernal Traffic, Airport Ops 1. Six mule deer are crossing the Runway 35 threshold. Closing Runway 17/35 for a five-minute wildlife sweep.",
     effect: "Marks RWY-35-THR block as CLOSED/OCCUPIED; forces any aircraft on short final (e.g., AIP408 or N172CN) to execute an immediate Go-Around."
   },
   {
     id: "SCEN-SAR-LODORE",
+    voiceClip: "rescue",
     title: "Garmin inReach SOS: Capsized Raft in Gates of Lodore",
     category: "Search & Rescue",
     freq: "121.500",
     sender: "UINTAH DISPATCH / RESCUE 1",
-    radioCall: "Uintah Rescue 1 lifting KVEL North Ramp priority SAR — Garmin SOS beacon activated at Disaster Falls inside Dinosaur National Monument, two rafters hypothermic on mid-river boulder.",
+    radioCall: "Uintah Dispatch calling Rescue 1. SOS at Disaster Falls in Dinosaur National Monument. Two rafters on a mid-river boulder, requesting a hoist crew.",
+    mission: { flightId: "RESCUE1", dest: "LZ-DINO", speedKt: 135, targetAltFt: 5500, task: "Disaster Falls rescue" },
     effect: "Launches RESCUE 1 (Bell 412EP) from KVEL to LZ-DINO for canyon hoist operation."
   },
   {
     id: "SCEN-MEDEVAC-UBMC",
+    voiceClip: "medevac",
     title: "Priority Trauma Launch from Roosevelt UBMC (UT09) to KSLC",
     category: "Medevac",
     freq: "123.050",
     sender: "CLASSIC LIFEGUARD 4",
-    radioCall: "Basin Med Comms, Classic Lifeguard 4 lifting Ashley Regional UT18 en route Uintah Basin Medical Center UT09 Roosevelt for oilfield trauma intercept, then direct Daniels Summit to Salt Lake Level 1.",
+    radioCall: "Basin Med Comms calling Classic Lifeguard 4. Roosevelt requests a trauma intercept at Uintah Basin Medical Center, UT09.",
+    mission: { flightId: "AIRMED4", dest: "UT09", speedKt: 140, targetAltFt: 5300, task: "Roosevelt trauma intercept" },
     effect: "Launches AIRMED4 from UT18 to UT09 and West Portal KSLC."
   },
   {
     id: "SCEN-CONTOUR-DEICE",
+    voiceClip: "deice",
     title: "Contour CRJ-200 Holdover Time Expiring During Fog Delay",
     category: "Dispatch / Ramp",
     freq: "129.450",
     sender: "VOLUNTEER 3101",
-    radioCall: "Vernal Jet Center, Volunteer 3101 at Gate 1 — freezing fog drizzle is building rime on our leading edges. We need Type I heated glycol and Type IV anti-ice spray before we can push for Runway 35.",
+    radioCall: "Vernal Jet Center, Volunteer 3101 at Gate 1. Freezing drizzle is building rime on our leading edges. Requesting de-icing before pushback.",
     effect: "Flags VTE3101 as requiring FBO De-Ice Truck service before pushback authorization."
   }
 ];

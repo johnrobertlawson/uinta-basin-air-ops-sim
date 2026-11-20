@@ -1,13 +1,17 @@
 import {
   AIRPORTS,
+  airportCategory,
   KVEL_BLOCKS,
   WEATHER_REGIMES,
   INITIAL_FLIGHTS,
-  PASSENGER_QUEUE,
-  DYNAMIC_SCENARIOS
+  PASSENGER_QUEUE
 } from "./data.js";
-import { PlayClock, advanceSurfaceDeparture, departureNeeds, divertFlight, holdDeparture, isDeparture, releaseFlight, updateReleases } from "./dispatch.js";
+import { PlayClock, departureNeeds, divertFlight, holdDeparture, needsDeicing, releaseFlight } from "./dispatch.js";
 import { renderDispatchDesk } from "./dispatch-desk.js";
+import { clearRunway, directorWorkload } from "./armchair.js";
+import { advanceSecond, dispatchCall, forecastActivity, injectScenario, processCrews, QUIET_GAP_MS, skipToActivity, START_TIME_MS } from "./simulation.js";
+import { radarWeather, updateWeatherPosition } from "./weather-map.js";
+import { GameSound } from "./sound.js";
 
 // ============================================================================
 // MODERN WEB GUIDANCE CONDITIONAL POLYFILLS & FALLBACKS
@@ -44,9 +48,11 @@ function initialFleet(activeRwy = WEATHER_REGIMES[0].activeRwy) {
 
 const playClock = new PlayClock();
 const state = {
-  simMinutes: 7 * 60 + 5, // 07:05 MST
+  simTimeMs: START_TIME_MS,
   speed: 1,
   role: "armchair", // armchair | dispatcher | fbo | tsa | pilot
+  directorPace: "gradual",
+  pendingMissions: [],
   view: "split", // split | kvel | basin
   surfaceDetail: true,
   weatherId: "inversion_fog",
@@ -60,7 +66,6 @@ const state = {
   rwyCloseReason: "",
   tickCount: 0,
   scenarioIndex: 0,
-  nextCrewMinute: 7 * 60 + 6,
   lastFocusedBeforeToast: null
 };
 
@@ -72,10 +77,21 @@ let toastIdSeq = 0;
 // ============================================================================
 const dom = {
   simClock: document.getElementById("simClock"),
+  radarClock: document.getElementById("radarClock"),
+  directorPanel: document.getElementById("directorPanel"),
+  directorStatus: document.getElementById("directorStatus"),
+  quietPrompt: document.getElementById("quietPrompt"),
+  quietDetail: document.getElementById("quietDetail"),
   airportConditions: document.getElementById("airportConditions"),
   metarText: document.getElementById("metarText"),
   methaneBadge: document.getElementById("methaneBadge"),
   weatherSelect: document.getElementById("weatherSelect"),
+  radarWeatherSelect: document.getElementById("radarWeatherSelect"),
+  radarOutlook: document.getElementById("radarOutlook"),
+  radarDialog: document.getElementById("radarDialog"),
+  openRadarMap: document.getElementById("openRadarMap"),
+  closeRadarMap: document.getElementById("closeRadarMap"),
+  radarZoom: document.getElementById("radarZoom"),
   radioPopupsToggle: document.getElementById("radioPopupsToggle"),
   diagramsContainer: document.getElementById("diagramsContainer"),
   kvelSchematicBox: document.getElementById("kvelSchematicBox"),
@@ -111,11 +127,10 @@ function getWeather() {
   return WEATHER_REGIMES.find((w) => w.id === state.weatherId) || WEATHER_REGIMES[0];
 }
 
-function formatSimTime(totalMins) {
-  const m = Math.floor(totalMins) % (24 * 60);
-  const hh = String(Math.floor(m / 60)).padStart(2, "0");
-  const mm = String(m % 60).padStart(2, "0");
-  return `${hh}:${mm} MST`;
+function formatSimTime(totalMs) {
+  const s = Math.floor(totalMs / 1000) % 86_400;
+  return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60]
+    .map(part => String(part).padStart(2, "0")).join(":") + " MST";
 }
 
 function getFlight(id) {
@@ -152,13 +167,15 @@ function positionRadioToasts() {
   }
 }
 const toastSizes = new ResizeObserver(positionRadioToasts);
+const sound = new GameSound(message => { document.getElementById("soundStatus").textContent = message; });
 
-function emitRadioCall({ freq, sender, message, isGuard = false, logOnly = false }) {
-  const timeStr = formatSimTime(state.simMinutes);
+function emitRadioCall({ freq, sender, message, isGuard = false, logOnly = false, voiceClip }) {
+  const timeStr = formatSimTime(state.simTimeMs);
   const entry = { id: ++toastIdSeq, timeStr, freq, sender, message, isGuard };
   state.radioLog.unshift(entry);
   if (state.radioLog.length > 50) state.radioLog.pop();
   renderRadioLog();
+  sound.receive({ freq, sender, message, isGuard: isGuard || freq === "121.500", logOnly, voiceClip });
 
   // Suppress popups if user disabled them OR a modal dialog is open
   if (logOnly) {
@@ -305,305 +322,69 @@ function syncSignallingBlocks() {
 // ============================================================================
 // SIMULATION TICK & AI AUTONOMY (ARMCHAIR MODE + BACKGROUND TRAFFIC)
 // ============================================================================
+let lastPlayedMs = playClock.read();
+let fractionalMs = 0;
+let quietWindow = null;
+let dismissedUntil = 0;
+let lastRunningSpeed = 1;
+
 function stepSimulation() {
-  if (state.speed === 0) return;
-
-  const stepMins = 0.08 * state.speed;
-  state.simMinutes += stepMins;
-  state.tickCount++;
-
-  if (state.rwyClosedTicks > 0) {
-    state.rwyClosedTicks = Math.max(0, state.rwyClosedTicks - stepMins);
-    if (state.rwyClosedTicks === 0) {
-      emitRadioCall({
-        freq: "122.800",
-        sender: "VERNAL AIRPORT OPS (OPS-1)",
-        message: "Vernal Traffic, Airport Ops 1 clear of Runway 17/35, wildlife dispersed east toward Ashley Creek. Runway 17/35 is open and clear."
-      });
+  const played = playClock.read();
+  fractionalMs += (played - lastPlayedMs) * state.speed;
+  lastPlayedMs = played;
+  const seconds = Math.floor(fractionalMs / 1000);
+  if (!seconds) {
+    if (state.speed && state.role === "dispatcher") {
+      if (state.flights.some(f => f.releaseDue != null && f.releaseDue <= played)) {
+        processCrews(state, getWeather(), played, emitRadioCall, true);
+        syncSignallingBlocks();
+        renderAll({ fromTick: true });
+      } else renderDispatchDesk(dom.dispatchPanel, state, getWeather(), played);
     }
+    return;
   }
-
+  fractionalMs %= 1000;
   const wx = getWeather();
-
-  for (const f of state.flights) {
-    // 1. Move enroute / approaching aircraft on Basin Radar
-    if (["ENROUTE", "APPROACH", "EMERGENCY"].includes(f.state)) {
-      const targetApt = AIRPORTS[f.dest] || AIRPORTS.KVEL;
-      const dx = targetApt.coords.x - f.pos.x;
-      const dy = targetApt.coords.y - f.pos.y;
-      const dist = Math.hypot(dx, dy);
-      const stepPx = (f.speedKt / 145) * 1.4 * Math.min(state.speed, 6);
-
-      if (dist > 8) {
-        f.pos.x += (dx / dist) * stepPx;
-        f.pos.y += (dy / dist) * stepPx;
-        f.heading = Math.round(((Math.atan2(dy, dx) * 180) / Math.PI + 450) % 360);
-        // Smooth altitude transition
-        if (Math.abs(f.altFt - f.targetAltFt) > 150) {
-          f.altFt += Math.sign(f.targetAltFt - f.altFt) * 140;
-        }
-      } else {
-        handleArrival(f, wx);
-        continue;
-      }
-
-      // Entering KVEL final approach block
-      const finalBlock = wx.activeRwy === "17" ? "FINAL-17" : "RNAV-35-FINAL";
-      if (f.dest === "KVEL" && dist < 85 && f.blockId !== finalBlock) {
-        f.blockId = finalBlock;
-        f.state = f.state === "EMERGENCY" ? "EMERGENCY" : "APPROACH";
-        f.freq = "122.800";
-        f.targetAltFt = 5500;
-        emitRadioCall({
-          freq: "122.800",
-          sender: f.callsign,
-          message: `Vernal Traffic, ${f.callsign} on final for Runway ${wx.activeRwy}, ${wx.flightCategory} conditions, Vernal.`
-        });
-      }
-    }
-
-    // 2. Traffic Pattern Flight (Student C172)
-    if (f.state === "PATTERN") {
-      if (wx.crosswindWarning && state.tickCount % 60 === 0) {
-        f.dest = "4V0";
-        f.state = "ENROUTE";
-        f.blockId = null;
-        emitRadioCall({
-          freq: "122.800",
-          sender: f.callsign,
-          message: `Vernal Traffic, ${f.callsign} aborting pattern work due to ${wx.windKt}G${wx.gustKt} crosswinds — departing southeast back to Rangely 4V0.`
-        });
-      } else if (state.tickCount % 16 === 0) {
-        const activeThr = wx.activeRwy === "17" ? "RWY-17-THR" : "RWY-35-THR";
-        const cycle = ["PAT-DOWNWIND", "PAT-BASE", activeThr, "PAT-UPWIND"];
-        const nextIdx = (cycle.indexOf(f.blockId) + 1) % cycle.length;
-        if (cycle[nextIdx] === activeThr && state.rwyClosedTicks > 0) {
-          f.blockId = "PAT-UPWIND";
-          emitRadioCall({
-            freq: "122.800",
-            sender: f.callsign,
-            message: `Vernal Traffic, ${f.callsign} going around Runway ${wx.activeRwy} for runway closure, climbing upwind to 6,300.`
-          });
-        } else {
-          f.blockId = cycle[nextIdx];
-        }
-      }
-    }
-
-    advanceSurfaceDeparture(f, state, wx, emitRadioCall);
-  }
-
-  // A gate agent and a ramp crew can work simultaneously. Their work follows sim time.
-  while (state.simMinutes >= state.nextCrewMinute) {
-    state.nextCrewMinute++;
-    if (state.role === "dispatcher" || state.role === "armchair") runGroundCrews(wx);
-  }
-  updateReleases(state, wx, playClock.read(), reportDispatch);
-  if (state.role === "armchair" && state.tickCount % 66 === 0) triggerNextDynamicScenario();
-
+  for (let i = 0; i < seconds; i++) advanceSecond(state, wx, played, emitRadioCall);
   syncSignallingBlocks();
   renderAll({ fromTick: true });
 }
 
-function handleArrival(f, wx) {
-  if (AIRPORTS[f.dest]?.type === "portal") {
-    // Reached off-map portal (KSLC / KDEN / KPHX): turn flight around after portal transit
-    const oldOrigin = f.origin;
-    const portalName = f.dest;
-    emitRadioCall({
-      freq: "135.775",
-      sender: "SALT LAKE CENTER (ZLC)",
-      message: `${f.callsign} leaving Uinta Basin airspace via ${portalName} portal, radar service continues outside map. Have a safe flight.`
-    });
-    // Cycle return leg so airspace stays lively
-    f.origin = portalName;
-    f.dest = oldOrigin === portalName ? "KVEL" : oldOrigin;
-    f.state = "ENROUTE";
-    f.blockId = null;
-    f.targetAltFt = 11500;
-    return;
+function renderQuietPrompt(recheck = false) {
+  if (recheck || !quietWindow || quietWindow.until <= state.simTimeMs) {
+    quietWindow = forecastActivity(state, getWeather(), playClock.read());
+    if (quietWindow) quietWindow.offer = quietWindow.until - state.simTimeMs >= QUIET_GAP_MS;
   }
-
-  if (f.dest === "KVEL") {
-    if (state.rwyClosedTicks > 0 && f.state !== "EMERGENCY") {
-      // Go-around!
-      f.pos.y += 45;
-      f.blockId = "PAT-UPWIND";
-      emitRadioCall({
-        freq: "122.800",
-        sender: f.callsign,
-        message: `Vernal Traffic, ${f.callsign} executing missed approach — Runway ${wx.activeRwy} occupied by Ops vehicle/wildlife!`
-      });
-      return;
-    }
-
-    // Check LIFR fog minimums for VFR-only GA
-    if (wx.flightCategory === "LIFR" && (f.category === "ga_student" || f.category === "ga_patrol")) {
-      f.dest = "74V";
-      f.blockId = null;
-      emitRadioCall({
-        freq: "122.800",
-        sender: f.callsign,
-        message: `Vernal Traffic, ${f.callsign} unable LIFR 1/2SM fog at KVEL — diverting west to Roosevelt (74V).`
-      });
-      return;
-    }
-
-    f.state = "PARKED";
-    f.parkedAt = "KVEL";
-    f.speedKt = 0;
-    f.altFt = 5281;
-    f.pos = { ...AIRPORTS.KVEL.coords };
-    f.blockId = f.category === "contour" ? "GATE-1" : f.category === "cargo" ? "CARGO-PAD" : "FBO-2";
-    f.squawk = f.squawk === "7700" ? "1200" : f.squawk;
-    emitRadioCall({
-      freq: "122.800",
-      sender: f.callsign,
-      message: `Vernal Traffic, ${f.callsign} clear of Runway ${wx.activeRwy} at Alpha, taxiing to ${f.blockId}.`
-    });
-    if (f.nextLegDest) {
-      f.origin = "KVEL";
-      f.dest = f.nextLegDest;
-      f.nextLegDest = null;
-      f.schedDep = f.schedArr = "";
-      f.fueled = f.deiced = f.dispatched = false;
-      f.dispatchHeld = false;
-      f.releasedBy = f.divertedFrom = f.releaseDue = null;
-    }
-    return;
-  }
-
-  // Arrived at Basin strip or helipad (74V, U69, 33U, 4V0, UT09, LZ-OURAY, LZ-DINO)
-  f.state = "PARKED";
-  f.parkedAt = f.dest;
-  f.speedKt = 0;
-  f.altFt = AIRPORTS[f.dest]?.elev || 5200;
-  f.blockId = f.dest === "UT18" ? "ARMC-PAD" : null;
-  emitRadioCall({
-    freq: AIRPORTS[f.dest]?.ctaf || "122.800",
-    sender: f.callsign,
-    message: `${f.dest} Traffic, ${f.callsign} safely on the ground at ${AIRPORTS[f.dest]?.name || f.dest}.`
-  });
+  const show = state.speed > 0 && quietWindow?.offer && quietWindow.until > dismissedUntil &&
+    playClock.read() >= 6000 && !isAnyModalOpen();
+  dom.quietPrompt.hidden = !show;
+  if (show) dom.quietDetail.textContent = `${quietWindow.event} at ${formatSimTime(quietWindow.until)}.`;
 }
+
+document.getElementById("stayQuiet").addEventListener("click", () => {
+  if (quietWindow) dismissedUntil = quietWindow.until;
+  dom.quietPrompt.hidden = true;
+});
+document.getElementById("skipQuiet").addEventListener("click", () => {
+  if (!quietWindow || !state.speed) return;
+  skipToActivity(state, getWeather(), playClock.read(), quietWindow.until, emitRadioCall);
+  fractionalMs = 0;
+  lastPlayedMs = playClock.read();
+  syncSignallingBlocks();
+  renderAll();
+});
 
 function reportDispatch(flight, sender, decision) {
-  emitRadioCall({
-    freq: "129.450", sender,
-    message: `${flight.callsign} · ${decision}.`,
-    logOnly: true
-  });
+  emitRadioCall(dispatchCall(flight, sender, decision));
 }
 
-function runGroundCrews(wx) {
-  const passenger = state.passengers.find(p => p.status === "pending" || p.status === "flagged");
-  if (passenger) {
-    const denied = passenger.correctAction === "deny_boarding";
-    passenger.status = denied ? "denied" : "cleared";
-    const flight = getFlight(passenger.flight.split(" ")[0]);
-    if (flight && !denied && flight.tsaClearedPax < flight.tsaTotalPax) flight.tsaClearedPax++;
-    emitRadioCall({
-      freq: "129.450", sender: "KVEL GATE",
-      message: `${flight?.callsign || "Gate 1"} boarding update · ${passenger.name} ${denied ? "will not board" : "cleared"}.`,
-      logOnly: state.role === "dispatcher"
-    });
-  }
-
-  const flight = state.flights.find(f => isDeparture(f) && ["BOARDING", "PARKED"].includes(f.state)
-    && (!f.fueled || (wx.deiceRequired && !f.deiced)));
-  if (!flight) return;
-  const fueling = !flight.fueled;
-  if (fueling) {
-    flight.fueled = true;
-    flight.fuelLbs += 650;
-  } else {
-    flight.deiced = true;
-  }
-  emitRadioCall({
-    freq: "129.450", sender: "VERNAL JET CENTER",
-    message: `${flight.callsign} · ${fueling ? "fueling" : "de-icing"} complete at ${flight.blockId}.`,
-    logOnly: state.role === "dispatcher"
-  });
+function refreshCrewDecisions() {
+  processCrews(state, getWeather(), playClock.read(), emitRadioCall);
 }
 
-// ============================================================================
-// DYNAMIC SCENARIOS (7700 EMERGENCIES, DEER ON RWY, METHANE SPIKE, SAR, MEDEVAC)
-// ============================================================================
 function triggerNextDynamicScenario() {
-  const scen = DYNAMIC_SCENARIOS[state.scenarioIndex % DYNAMIC_SCENARIOS.length];
-  state.scenarioIndex++;
-
-  emitRadioCall({
-    freq: scen.freq,
-    sender: scen.sender,
-    message: scen.radioCall,
-    isGuard: scen.freq === "121.500"
-  });
-
-  if (scen.id === "SCEN-DEER-RWY") {
-    state.rwyClosedTicks = 3.5;
-    state.rwyCloseReason = "DEER SWEEP";
-  } else if (scen.id === "SCEN-7700-ICING") {
-    if (!getFlight("N842K")) {
-      state.flights.unshift({
-        id: "N842K",
-        callsign: "BONANZA 842K [7700]",
-        operator: "Transient GA Emergency",
-        type: "Beechcraft Bonanza A36",
-        category: "ga_transit",
-        tail: "N842K",
-        origin: "KSLC",
-        dest: "KVEL",
-        alternate: "U69",
-        schedDep: "LIVE",
-        schedArr: "ASAP",
-        state: "EMERGENCY",
-        blockId: null,
-        pos: { x: 165, y: 315 },
-        altFt: 11200,
-        targetAltFt: 5281,
-        speedKt: 165,
-        heading: 92,
-        fuelLbs: 310,
-        paxCount: 3,
-        cargoLbs: 80,
-        deiced: false,
-        fueled: true,
-        dispatched: true,
-        tsaClearedPax: 0,
-        tsaTotalPax: 0,
-        squawk: "7700",
-        freq: "121.500",
-        pilotNotes: "MAYDAY — Severe rime ice over Daniels Summit; descending to KVEL Runway 35 priority."
-      });
-    }
-  } else if (scen.id === "SCEN-SAR-LODORE") {
-    const sar = getFlight("RESCUE1");
-    if (sar) {
-      sar.dest = "LZ-DINO";
-      sar.state = "ENROUTE";
-      sar.blockId = null;
-      sar.speedKt = 135;
-      sar.altFt = 6800;
-      sar.targetAltFt = 5500;
-    }
-  } else if (scen.id === "SCEN-MEDEVAC-UBMC") {
-    const med = getFlight("AIRMED4");
-    if (med) {
-      med.dest = "UT09";
-      med.state = "ENROUTE";
-      med.blockId = null;
-      med.speedKt = 140;
-      med.altFt = 6400;
-      med.targetAltFt = 5300;
-    }
-  } else if (scen.id === "SCEN-CONTOUR-DEICE") {
-    const vte = getFlight("VTE3101");
-    if (vte && ["BOARDING", "PARKED"].includes(vte.state)) {
-      vte.deiced = false;
-    }
-  }
-
-  updateReleases(state, getWeather(), playClock.read(), reportDispatch, false);
+  injectScenario(state, emitRadioCall);
+  refreshCrewDecisions();
   syncSignallingBlocks();
   renderAll();
 }
@@ -719,7 +500,7 @@ function renderKvelSvg() {
 // ============================================================================
 // SVG RENDERER 2: UINTA BASIN REGIONAL AIRSPACE & OFF-MAP PORTALS RADAR
 // ============================================================================
-function renderBasinBackground() {
+function renderBasinBackground(wx) {
   let svg = `
     <rect width="1000" height="620" fill="var(--chart)"/>
     <!-- Basin Topography Hints -->
@@ -746,6 +527,11 @@ function renderBasinBackground() {
     <circle cx="580" cy="310" r="105" fill="none" stroke="#263b41" stroke-width="1.2"/>
     <circle cx="580" cy="310" r="220" fill="none" stroke="#263b41" stroke-width="1.2"/>
     <text x="667" y="245" fill="var(--text-muted)" font-size="13">20 NM</text>
+    ${radarWeather(wx)}
+    <g transform="translate(953 46)" fill="#a2b6bd" text-anchor="middle">
+      <text y="-10" font-size="14" font-weight="700">N</text>
+      <path d="M0 -3L6 16 0 12 -6 16Z" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    </g>
   `;
 
   // Render Airports, Helipads & Portals
@@ -756,12 +542,6 @@ function renderBasinBackground() {
         <rect x="${x - 32}" y="${y - 14}" width="64" height="28" fill="var(--chart)" stroke="#6f919a" stroke-width="1.5"/>
         <text x="${x}" y="${y + 4}" text-anchor="middle" fill="#b9cdd1" font-size="15" font-weight="650">${apt.code}</text>
       `;
-    } else if (apt.type === "hub") {
-      svg += `
-        <circle cx="${x}" cy="${y}" r="10" fill="#17343b" stroke="var(--accent-cyan)" stroke-width="2.5"/>
-        <text x="${x + 15}" y="${y - 4}" fill="var(--accent-cyan)" font-size="15" font-weight="700">KVEL</text>
-        <text x="${x + 15}" y="${y + 9}" fill="var(--text-muted)" font-size="13">Vernal Regional</text>
-      `;
     } else if (apt.type === "helipad" || apt.type === "patrol" || apt.type === "sar") {
       const color = "#9ebac0";
       svg += `
@@ -769,26 +549,37 @@ function renderBasinBackground() {
         <text x="${x + 10}" y="${y + 4}" fill="${color}" font-size="14" font-weight="600">${apt.code}</text>
       `;
     } else {
-      const stroke = apt.type === "regional" ? "#a6b9bf" : "#b4e0df";
-      svg += `
-        <circle cx="${x}" cy="${y}" r="6" fill="var(--chart)" stroke="${stroke}" stroke-width="1.8"/>
-        <text x="${x + 10}" y="${y + 4}" fill="${stroke}" font-size="15" font-weight="650">${apt.code}</text>
-      `;
+      const category = airportCategory(wx, apt.code);
+      const r = apt.type === "hub" ? 11 : 7;
+      svg += `<g class="airport-marker cat-${category}" data-airport="${apt.code}">
+        <title>${escapeHtml(apt.name)} · ${category}</title>
+        <circle cx="${x}" cy="${y}" r="${r}" fill="var(--chart)" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="${x}" cy="${y}" r="2.5" fill="currentColor"/>
+        <text class="radar-label" x="${x + r + 5}" y="${y + 3}" fill="currentColor" font-size="15" font-weight="700">${apt.code} · ${category}</text>
+        <text class="radar-label" x="${x + r + 5}" y="${y + 19}" fill="var(--text-muted)" font-size="14">${apt.shortName}</text>
+      </g>`;
     }
   }
 
   dom.basinSvg.innerHTML = svg + '<g class="radar-traffic"></g>';
+  dom.basinSvg.dataset.weather = wx.id;
+  // Protect weather annotations as well as the station labels from aircraft tags.
+  weatherLabelBoxes = [...dom.basinSvg.querySelectorAll(".wx-label")].map(label => {
+    const { x, y, width, height } = label.getBBox();
+    return { x: x - 3, y: y - 2, w: width + 6, h: height + 4 };
+  });
 }
 
 // Reserve room around fixed map symbols before placing movable aircraft labels.
+let weatherLabelBoxes = [];
 const radarFacilities = Object.values(AIRPORTS).map(({ code, type, coords: { x, y } }) => ({
   x: x - (type === "portal" ? 35 : 10), y: y - 17,
-  w: type === "hub" ? 116 : type === "portal" ? 70 : 24 + code.length * 10, h: 35
+  w: ["hub", "regional", "basin"].includes(type) ? 134 : type === "portal" ? 70 : 24 + code.length * 10, h: 40
 }));
 
 function placeRadarLabel(point, used) {
   const width = 126, height = 36;
-  for (const offset of [0, -38, 38, -76, 76, -114, 114, -152, 152]) {
+  for (const offset of [0, -38, 38, -76, 76, -114, 114, -152, 152, -190, 190, -228, 228, -266, 266]) {
     for (const x of [point.x + 17, point.x - width - 17]) {
       const box = { x: Math.max(3, Math.min(997 - width, x)), y: Math.max(3, Math.min(617 - height, point.y - 18 + offset)), w: width, h: height };
       if (used.some(b => box.x < b.x + b.w && box.x + width > b.x && box.y < b.y + b.h && box.y + height > b.y)) continue;
@@ -800,8 +591,12 @@ function placeRadarLabel(point, used) {
 }
 
 function renderBasinSvg() {
-  if (!dom.basinSvg.firstElementChild) renderBasinBackground();
-  const used = [...radarFacilities, ...state.flights.map(f => ({ x: f.pos.x - 7, y: f.pos.y - 7, w: 14, h: 14 }))];
+  const wx = getWeather();
+  if (dom.basinSvg.dataset.weather !== wx.id) renderBasinBackground(wx);
+  updateWeatherPosition(dom.basinSvg, state.simTimeMs - START_TIME_MS, getFlight("N842K")?.state === "EMERGENCY");
+  const used = [...radarFacilities, ...weatherLabelBoxes,
+    { x: 338, y: 75, w: 302, h: 20 }, { x: 368, y: 493, w: 233, h: 22 },
+    ...state.flights.map(f => ({ x: f.pos.x - 7, y: f.pos.y - 7, w: 14, h: 14 }))];
   let svg = "";
   for (const f of state.flights) {
     const isSel = f.id === state.selectedFlightId;
@@ -939,7 +734,7 @@ function renderRoleWorkstation() {
           <div class="role-card">
             <h3><span>${f.blockId}: ${escapeHtml(f.callsign)}</span><span class="desk-tag">${f.type}</span></h3>
             <div class="desk-copy">
-              Fuel: ${f.fueled ? "Serviced" : "Needs Jet-A/100LL"} | De-Ice: ${f.deiced ? "Sprayed" : wx.deiceRequired ? "Frost Present" : "Clear"}
+              Fuel: ${f.fueled ? "Serviced" : "Needs Jet-A/100LL"} | De-Ice: ${f.deiced ? "Sprayed" : needsDeicing(f, wx) ? "Service required" : "Clear"}
             </div>
             <div class="action-row">
               <button type="button" class="btn" data-fbo-fuel="${f.id}">Dispatch Fuel Truck</button>
@@ -961,8 +756,7 @@ function renderRoleWorkstation() {
       renderAll();
     });
     document.getElementById("fboOpenRwyBtn")?.addEventListener("click", () => {
-      state.rwyClosedTicks = 0;
-      emitRadioCall({ freq: "122.800", sender: "VERNAL OPS-1", message: "Vernal Traffic, Ops 1 clear of Runway 17/35, surface clear and braking action good." });
+      clearRunway(state, emitRadioCall);
       syncSignallingBlocks();
       renderAll();
     });
@@ -981,6 +775,7 @@ function renderRoleWorkstation() {
         const f = getFlight(btn.dataset.fboDeice);
         if (!f) return;
         f.deiced = true;
+        f.deiceRequested = false;
         emitRadioCall({ freq: "129.450", sender: "VJC DE-ICE PAD", message: `${f.callsign}, wings and tail sprayed with Type I/IV glycol. Post-deice check clean, holdover starts now.` });
         renderAll();
       })
@@ -1215,17 +1010,29 @@ function renderRadioLog() {
 
 function renderHeaderAndWeather() {
   const wx = getWeather();
-  dom.simClock.textContent = formatSimTime(state.simMinutes);
+  const time = formatSimTime(state.simTimeMs);
+  dom.simClock.textContent = dom.radarClock.textContent = time;
+  if (state.role === "armchair") {
+    const explanation = {
+      off: "Director off duty.",
+      gradual: "Crews respond each simulated minute.",
+      immediate: "Crews handle requests as they arrive."
+    }[state.directorPace];
+    dom.directorStatus.textContent = explanation + " " + directorWorkload(state, wx) + ".";
+  }
   if (state.role === "dispatcher") {
     const label = "Vernal " + (state.surfaceDetail ? "airfield" : "and Ashley Valley") +
       " · " + (state.rwyClosedTicks > 0 ? "Runway closed" : "Runway " + wx.activeRwy + " active");
     if (label !== dom.dispatchMapLabel.textContent) dom.dispatchMapLabel.textContent = label;
   }
+  const outlook = wx.radarOutlook + (getFlight("N842K")?.state === "EMERGENCY" ? " Pilot report of severe icing over Daniels Summit." : "");
+  if (dom.radarOutlook.textContent !== outlook) dom.radarOutlook.textContent = outlook;
   if (dom.airportConditions.dataset.weather === wx.id) return;
   dom.airportConditions.dataset.weather = wx.id;
-  const localConditions = { KVEL: wx.flightCategory, ...wx.nearbyCategories };
-  dom.airportConditions.innerHTML = Object.entries(localConditions).map(([code, category]) => {
+  dom.weatherSelect.value = dom.radarWeatherSelect.value = wx.id;
+  dom.airportConditions.innerHTML = ["KVEL", ...Object.keys(wx.nearbyCategories)].map(code => {
     const airport = AIRPORTS[code];
+    const category = airportCategory(wx, code);
     return `<li class="station"><div class="station-line"><strong class="station-code">${code}</strong>
       <span class="flight-category cat-${category}">${category}</span></div>
       <span class="station-name">${escapeHtml(airport.name.replace(/ Airport$/, ""))}</span></li>`;
@@ -1262,8 +1069,9 @@ function renderAirportDirectory() {
 
 function renderAll({ fromTick = false } = {}) {
   renderHeaderAndWeather();
+  renderQuietPrompt(!fromTick);
   if (state.view !== "basin") renderKvelSvg();
-  if (state.view !== "kvel") renderBasinSvg();
+  if (state.view !== "kvel" || dom.radarDialog.open) renderBasinSvg();
   renderFlightTable();
   // Avoid clobbering open <select>/<input> controls inside the role desk during background ticks
   const active = document.activeElement;
@@ -1278,14 +1086,18 @@ function renderAll({ fromTick = false } = {}) {
 // EVENT LISTENERS & BOOTSTRAP
 // ============================================================================
 function setSpeed(speed) {
+  stepSimulation();
   playClock.setRunning(speed !== 0);
+  lastPlayedMs = playClock.read();
   state.speed = speed;
+  if (speed) lastRunningSpeed = speed;
   document.querySelectorAll("[data-speed]").forEach(button => {
     const active = Number(button.dataset.speed) === speed;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
   if (state.role === "dispatcher") renderDispatchDesk(dom.dispatchPanel, state, getWeather(), playClock.read());
+  renderQuietPrompt(true);
 }
 
 function setView(view) {
@@ -1297,7 +1109,7 @@ function setView(view) {
   }
   dom.diagramsContainer.classList.toggle("split-view", view === "split");
   dom.kvelSchematicBox.hidden = view === "basin";
-  dom.basinRadarBox.hidden = view === "kvel";
+  dom.basinRadarBox.hidden = view === "kvel" && !dom.radarDialog.open;
 }
 
 function setSurfaceExtent() {
@@ -1334,18 +1146,25 @@ function setRole(role) {
     dom.roleDeskBody.hidden = dispatch;
     dom.trafficDetails.open = !dispatch;
   }
-  state.role = role;
+  if (state.role !== role) sound.cue();
+  state.role = sound.role = role;
+  sound.mix();
+  dom.directorPanel.hidden = role !== "armchair";
   setSurfaceExtent();
   for (const tab of document.querySelectorAll("[data-role]")) {
     const active = tab.dataset.role === role;
     tab.setAttribute("aria-selected", String(active));
     tab.tabIndex = active ? 0 : -1;
   }
-  updateReleases(state, getWeather(), playClock.read(), reportDispatch, false);
+  refreshCrewDecisions();
   renderAll();
 }
 
 const roleTabs = [...document.querySelectorAll("[data-role]")];
+window.addEventListener("hashchange", event => {
+  if (location.hash === "#dispatch") setRole("dispatcher");
+  else if (!location.hash && new URL(event.oldURL).hash === "#dispatch") setRole("armchair");
+});
 for (const [index, tab] of roleTabs.entries()) {
   tab.addEventListener("click", () => setRole(tab.dataset.role));
   tab.addEventListener("keydown", e => {
@@ -1365,10 +1184,20 @@ for (const button of document.querySelectorAll("[data-view]")) {
   button.addEventListener("click", () => { setView(button.dataset.view); renderAll(); });
 }
 
-dom.workspace.addEventListener("click", event => {
+function selectTraffic(event) {
   const target = event.target.closest("[data-dispatch-flight],[data-select-flight],[data-flight-id]");
   if (!target) return;
   state.selectedFlightId = target.dataset.dispatchFlight || target.dataset.selectFlight || target.dataset.flightId;
+  renderAll();
+}
+dom.workspace.addEventListener("click", selectTraffic);
+dom.radarDialog.addEventListener("click", selectTraffic);
+
+dom.directorPanel.addEventListener("change", event => {
+  if (event.target.name !== "directorPace") return;
+  state.directorPace = event.target.value;
+  refreshCrewDecisions();
+  syncSignallingBlocks();
   renderAll();
 });
 dom.trafficDetails.addEventListener("toggle", renderFlightTable);
@@ -1396,20 +1225,94 @@ dom.dispatchPanel.addEventListener("click", event => {
   renderAll();
 });
 
-dom.weatherSelect.addEventListener("change", (e) => {
+function changeWeather(e) {
   state.weatherId = e.target.value;
   const wx = getWeather();
   for (const f of state.flights) {
     if (["FINAL-17", "RNAV-35-FINAL"].includes(f.blockId)) f.blockId = wx.activeRwy === "17" ? "FINAL-17" : "RNAV-35-FINAL";
   }
-  updateReleases(state, wx, playClock.read(), reportDispatch, false);
+  refreshCrewDecisions();
   syncSignallingBlocks();
   emitRadioCall({
     freq: "135.225",
     sender: "KVEL AWOS-3PT",
+    voiceClip: wx.id,
     message: `Special Weather Update — ${wx.name}. ${wx.metar}`
   });
   renderAll();
+}
+dom.radarWeatherSelect.replaceChildren(...[...dom.weatherSelect.options].map(option => option.cloneNode(true)));
+dom.weatherSelect.addEventListener("change", changeWeather);
+dom.radarWeatherSelect.addEventListener("change", changeWeather);
+
+dom.basinRadarBox.addEventListener("change", event => {
+  const { layer } = event.target.dataset;
+  if (layer) dom.basinSvg.classList.toggle("hide-" + layer, !event.target.checked);
+});
+
+// The dialog also fills the browser window when native fullscreen is unavailable.
+let nativeRadarFullscreen = false;
+function setRadarZoom(zoomed) {
+  dom.basinRadarBox.classList.toggle("radar-zoomed", zoomed);
+  dom.radarZoom.textContent = zoomed ? "Fit basin" : "Zoom in";
+  dom.radarZoom.setAttribute("aria-pressed", String(zoomed));
+  const viewport = dom.basinSvg.parentElement;
+  viewport.scrollLeft = zoomed ? viewport.scrollWidth * .58 - viewport.clientWidth / 2 : 0;
+  viewport.scrollTop = zoomed ? (viewport.scrollHeight - viewport.clientHeight) / 2 : 0;
+}
+dom.radarZoom.addEventListener("click", () => setRadarZoom(!dom.basinRadarBox.classList.contains("radar-zoomed")));
+dom.openRadarMap.addEventListener("click", () => {
+  dom.radarDialog.append(dom.basinRadarBox);
+  dom.basinRadarBox.hidden = false;
+  dom.radarDialog.showModal();
+  renderBasinSvg();
+  setRadarZoom(matchMedia("(max-width: 720px) and (orientation: portrait)").matches);
+  dom.closeRadarMap.focus();
+  if (document.fullscreenEnabled) {
+    dom.basinRadarBox.requestFullscreen().then(() => {
+      nativeRadarFullscreen = document.fullscreenElement === dom.basinRadarBox;
+    }).catch(() => {});
+  }
+});
+dom.closeRadarMap.addEventListener("click", () => dom.radarDialog.close());
+document.addEventListener("fullscreenchange", () => {
+  const active = document.fullscreenElement === dom.basinRadarBox;
+  if (nativeRadarFullscreen && !active && dom.radarDialog.open) dom.radarDialog.close();
+  nativeRadarFullscreen = active;
+});
+dom.radarDialog.addEventListener("close", () => {
+  nativeRadarFullscreen = false;
+  if (document.fullscreenElement === dom.basinRadarBox) document.exitFullscreen().catch(() => {});
+  dom.radarDialog.returnValue = "";
+  setRadarZoom(false);
+  dom.diagramsContainer.append(dom.basinRadarBox);
+  dom.basinRadarBox.hidden = state.view === "kvel";
+  dom.openRadarMap.focus({ preventScroll: true });
+});
+
+const soundDialog = document.getElementById("soundDialog");
+document.getElementById("openSoundBtn").addEventListener("click", () => soundDialog.showModal());
+soundDialog.addEventListener("close", () => { soundDialog.returnValue = ""; });
+document.getElementById("previewPilot").addEventListener("click", () => sound.preview("pilot", "Bonanza 842 Kilo"));
+document.getElementById("previewWeather").addEventListener("click", () => sound.preview(getWeather().id, "Vernal automated weather"));
+document.getElementById("stopVoice").addEventListener("click", () => sound.stopVoice());
+document.getElementById("voiceToggle").addEventListener("change", event => {
+  sound.voices = event.target.checked;
+  if (sound.voices) {
+    window.speechSynthesis?.getVoices();
+    sound.unlock().catch(error => sound.status(error.message));
+  } else sound.stopVoice();
+});
+document.getElementById("cueToggle").addEventListener("change", async event => {
+  sound.effects = event.target.checked;
+  if (sound.effects) {
+    try { await sound.unlock(); sound.cue(); } catch (error) { sound.status(error.message); }
+  }
+});
+document.getElementById("roomToggle").addEventListener("change", event => sound.setRoom(event.target.checked));
+document.getElementById("soundLevel").addEventListener("input", event => {
+  sound.level = Number(event.target.value) / 100;
+  sound.mix();
 });
 
 dom.radioPopupsToggle.addEventListener("change", (e) => {
@@ -1423,11 +1326,16 @@ dom.clearLogBtn.addEventListener("click", () => {
 });
 
 dom.resetSimBtn?.addEventListener("click", () => {
-  state.simMinutes = 7 * 60 + 5;
+  sound.stopVoice();
+  state.simTimeMs = START_TIME_MS;
   state.blocks = KVEL_BLOCKS.map((b) => ({ ...b }));
   state.flights = initialFleet(getWeather().activeRwy);
   playClock.reset(state.speed !== 0);
-  state.nextCrewMinute = state.simMinutes + 1;
+  lastPlayedMs = fractionalMs = dismissedUntil = 0;
+  quietWindow = null;
+  state.directorPace = "gradual";
+  dom.directorPanel.querySelector('[value="gradual"]').checked = true;
+  state.pendingMissions = [];
   state.radioLog = [];
   for (const toast of [...activeToasts]) dismissToast(toast, false);
   dom.flightTableBody.replaceChildren();
@@ -1447,13 +1355,13 @@ dom.resetSimBtn?.addEventListener("click", () => {
   });
 });
 
-// Spacebar toggles pause / 1x when not focused on an interactive form control
+// Space resumes the most recent running speed outside interactive controls.
 document.addEventListener("keydown", (e) => {
   if (e.code !== "Space" || isAnyModalOpen()) return;
   const tag = document.activeElement?.tagName;
   if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(tag)) return;
   e.preventDefault();
-  setSpeed(state.speed === 0 ? 1 : 0);
+  setSpeed(state.speed === 0 ? lastRunningSpeed : 0);
 });
 
 // MANDATORY per dialog guide: read and reset dialog.returnValue on close

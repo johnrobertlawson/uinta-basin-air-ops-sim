@@ -1,46 +1,45 @@
-# KVEL & Uinta Basin Air Operations Simulator
+# Uinta Basin Air Ops Sim
 
-A lightweight, DLR train signalling–inspired multi-role aviation operations simulator centered on **Vernal Regional Airport (`KVEL`)** and the **Ashley Valley**, extending across the **Uinta Basin** (`74V` Roosevelt, `U69` Duchesne, `33U` Dutch John, `4V0` Rangely, hospital/gas-field/SAR helipads), outer-ring regional airports (`KPUC`, `KRKS`, `KGJT`, `KSPK`), and off-map portals (`KSLC`, `KDEN`, `KPHX`).
+Watch the morning shift at Vernal Regional Airport (KVEL), or take the dispatch, ramp, ticketing, or pilot desk yourself. Flights, crews, weather, and radio calls share one simulated basin.
 
-## One-Click Install (macOS & Ubuntu)
+## Install and play
 
-Download the latest versioned installer from the [GitHub Releases](https://github.com/johnrobertlawson/uinta-basin-air-ops-sim/releases) page:
+Download the installer for your platform from the [latest release](https://github.com/johnrobertlawson/uinta-basin-air-ops-sim/releases/latest).
 
-- **macOS (`Uinta-Basin-Air-Ops-Sim-<version>-macOS.pkg`):** Double-click the `.pkg` to install **Uinta Basin Air Ops Sim.app** into `/Applications`, then launch from Applications or Spotlight.
-- **Ubuntu / Debian (`uinta-basin-air-ops-sim_<version>_all.deb`):** Double-click the `.deb` in Ubuntu Software / App Center, or run:
-  ```bash
-  sudo apt install ./uinta-basin-air-ops-sim_0.1.0_all.deb
-  ```
-  Then launch **Uinta Basin Air Ops Sim** from your application menu (or run `uinta-basin-air-ops-sim`).
+- **macOS** — Open the `.pkg`, then launch **Uinta Basin Air Ops Sim** from Applications. The app uses Python 3 to serve the game locally and opens your browser.
+- **Ubuntu or Debian** — Open the `.deb` in your software installer, then launch **Uinta Basin Air Ops Sim** from the applications menu.
 
-## Run From Source
+To play from a checkout, run `python3 scripts/launcher.py`. The launcher uses the loopback address and prefers port 8742. The simulator, weather map, and bundled sounds work offline.
 
-Because the app uses ES modules (`type="module"`), launch with the bundled zero-dependency server:
+## First shift
 
-```bash
-python3 scripts/launcher.py
-```
+- **Clock and pace.** The shift starts at 07:05:00 MST. Play at 0.5×, real time (1×), or 5×. Space pauses and resumes your chosen speed. When the sim predicts at least 45 quiet simulated seconds, **Skip ahead** advances flights and crews to the next activity. **Keep watching** dismisses that offer.
+- **Armchair Director.** **Fix gradually** starts on by default. The gate and ramp crews each take one job per simulated minute, and the Director coordinates incident calls. **Fix immediately** handles the backlog and new requests as they arrive. **Off** leaves the Director off duty. Aircraft fly their routes, and explicit dispatch holds stay in force. Reset starts a fresh shift with gradual handling.
+- **Weather map.** Open **Full-screen map** from any desk. Switch between four weather scenarios and toggle precipitation returns, storm contours, icing, other hazards, and aircraft. All nine on-map airports have a color and a written flight category. Try **Gusty cold front** to see the moving snow bands. Escape or **Exit full screen** returns to your previous map view.
+- **Sound.** Open **Sound** and try **Play pilot call** and **Play METAR**. Enable radio voices, soft cues, and terminal ambience independently. The gate murmur is strongest at the ticketing desk and fades beneath speech. Voices always speak at normal speed.
 
-Or serve manually:
+## Take a desk
 
-```bash
-python3 -m http.server 8080
-```
+| Desk | What you control |
+| --- | --- |
+| Flight Dispatch | Select a flight strip to release, hold, or divert. Crews request release once ready. After 60 seconds of unpaused playing time, relief can handle an unanswered request. Open `/#dispatch` for this starting view. |
+| FBO & Ramp | Fuel, de-ice, marshal aircraft, and inspect or reopen the runway. |
+| TSA & Ticketing | Work the passenger queue and resolve declarations, screening, and boarding decisions. |
+| Pilot Command | Choose an aircraft, destination, or squawk, fly the pattern, and make radio calls. |
 
-## Build Installers Locally
+**Basin briefing** contains the airport directory, frequencies, and Vernal weather report. The regional map covers the basin and its outer airfields. Salt Lake City, Denver, and Phoenix appear as off-map portals.
 
-```bash
+## Radio and ambience
+
+Scripted incidents use bundled, lightly filtered generated voices. Each weather regime has its own robotic AWOS reading. Variable calls use an English speech voice supplied by the browser when available, so their timbre varies by device. During bursts of traffic, Guard calls take priority in the short playback queue. The transcript keeps the latest 50 entries. The voice recordings and layered terminal ambience were made with the [Piper LJ Speech model](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/ljspeech/high) and the [public-domain LJ Speech dataset](https://keithito.com/LJ-Speech-Dataset/).
+
+## Verify and package
+
+With Node 22 and Python 3 installed, run the following from the repository root.
+
+```sh
+node --experimental-default-type=module --test tests/*.test.mjs
 python3 scripts/build_packages.py
 ```
 
-Artifacts are written to `dist/` using the version in `VERSION`.
-
-The top row shows simulated flight categories for Vernal, Roosevelt, Duchesne, Dutch John, and Rangely. Open **Basin briefing** for the weather scenario, Vernal AWOS report, and airport directory.
-
-## Included Roles & Modes
-
-- **Armchair AI Director**: Full autonomous AI characters across Dispatch, FBO/Ramp, TSA/Ticketing, Pilots, Salt Lake Center (`135.775`), CTAF (`122.800`), Vernal Jet Center (`129.450`), and Guard (`121.500`), with unobtrusive written radio call popups and a permanent transcript log.
-- **Flight Dispatcher**: Select **Flight Dispatch** or open `/#dispatch` on the local server. Flight strips lead the desk with the Vernal airfield alongside. Gate and ramp crews handle passenger processing, fuel, and de-icing. A ready departure marks its strip and calls once in the written log. After 60 seconds of unpaused play, a relief dispatcher can release an unanswered flight at any simulation speed. A hold stays in force until you release it. Select an airborne flight to divert it to its filed alternate.
-- **FBO & Ramp Agent (Vernal Jet Center)**: Jet-A/100LL fueling, Type I/IV glycol de-icing, marshalling to Taxiway Alpha, and Runway 17/35 wildlife/FOD sweeps.
-- **TSA & Airline Ticketing**: Screen realistic Uinta Basin passengers (Book Cliffs hunters, USU Bingham Research Center snow-depth sensor gear, directional drillers, river guides, and late/unmanifested hazmat edge cases).
-- **Pilot Command**: Fly Contour jets, private light jets, Alpine cargo turboprops, Classic Air Medevac (`UT18`/`UT09`), Uintah SAR (`LZ-DINO`), methane leak survey patrols (`LZ-OURAY`), or CNCC/USU student patterns.
+Installers are written to `dist/`. Building the macOS package requires macOS and `pkgbuild`. The Python packager can build the Debian package on either platform.

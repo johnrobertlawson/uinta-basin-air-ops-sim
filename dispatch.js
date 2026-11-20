@@ -24,12 +24,16 @@ export function gateCases(flight, passengers) {
     && (p.status === "pending" || p.status === "flagged")).length;
 }
 
+export function needsDeicing(flight, weather) {
+  return !flight.deiced && (weather.deiceRequired || Boolean(flight.deiceRequested));
+}
+
 export function departureNeeds(flight, weather, passengers) {
   const needs = [];
   const count = gateCases(flight, passengers);
   if (count) needs.push(`Gate processing ${count} passenger${count === 1 ? "" : "s"}`);
   if (!flight.fueled) needs.push("Fuel truck");
-  if (weather.deiceRequired && !flight.deiced) needs.push("De-icing");
+  if (needsDeicing(flight, weather)) needs.push("De-icing");
   return needs;
 }
 
@@ -97,17 +101,23 @@ export function updateReleases(state, weather, playedMs, report, allowAutomatic 
       flight.releaseDue = null;
       continue;
     }
-    if (flight.releaseDue != null) {
+    if (state.role === "armchair" && state.directorPace === "off") continue;
+    if (allowAutomatic && state.role === "armchair" && (flight.releaseDue == null || state.directorPace === "immediate")) {
+      if (releaseFlight(flight, needs, "Dispatch")) report(flight, "Dispatch", "released the flight for taxi");
+    } else if (flight.releaseDue != null) {
       if (allowAutomatic && playedMs >= flight.releaseDue && releaseFlight(flight, needs, "Relief dispatcher")) {
         report(flight, "Relief dispatcher", "covered the unanswered request and released the flight");
       }
     } else if (state.role === "dispatcher") {
       flight.releaseDue = playedMs + RELIEF_MS;
       report(flight, flight.callsign, "ready for departure, requesting dispatch release");
-    } else if (allowAutomatic && state.role === "armchair" && releaseFlight(flight, needs, "Dispatch")) {
-      report(flight, "Dispatch", "released the flight for taxi");
     }
   }
+}
+
+export function priorityOnFinal(flights, except) {
+  return flights.some(f => f !== except && f.priorityHandling && f.state === "EMERGENCY" &&
+    ["FINAL-17", "RNAV-35-FINAL"].includes(f.blockId));
 }
 
 // A recalled release leaves the aircraft on its current surface block.
@@ -127,7 +137,7 @@ export function advanceSurfaceDeparture(f, state, wx, emitRadioCall) {
     });
   } else if (f.state === "HOLD_SHORT" && state.tickCount % 12 === 0 && state.rwyClosedTicks <= 0) {
     const rwyFree = !state.flights.some((o) => o.id !== f.id && ["RWY-35-THR", "RWY-MID", "RWY-17-THR"].includes(o.blockId));
-    if (rwyFree) {
+    if (rwyFree && !priorityOnFinal(state.flights, f)) {
       f.state = "TAKEOFF";
       f.blockId = "RWY-MID";
       f.speedKt = 110;

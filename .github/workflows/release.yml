@@ -14,8 +14,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Syntax check JS
-        run: node --check data.js && node --check app.js
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check modules, simulation rules and release version
+        run: |
+          for module in *.js; do node --experimental-default-type=module --check "$module" || exit 1; done
+          node --experimental-default-type=module --test tests/*.test.mjs
+          version=$(cat VERSION)
+          grep -Fq ">v${version}</span>" index.html
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then test "$GITHUB_REF_NAME" = "v$version"; fi
       - name: Build Ubuntu .deb
         run: |
           python3 scripts/build_packages.py --target deb
@@ -53,6 +61,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF_NAME}"
+          (cd artifacts && sha256sum *.pkg *.deb > SHA256SUMS)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" artifacts/* --clobber
           else
