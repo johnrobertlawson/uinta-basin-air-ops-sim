@@ -5,15 +5,25 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to build and publish (leave blank for a build only)
+        required: false
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
 
 jobs:
   build-ubuntu:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG && format('refs/tags/{0}', env.RELEASE_TAG) || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -23,7 +33,7 @@ jobs:
           node --experimental-default-type=module --test tests/*.test.mjs
           version=$(cat VERSION)
           grep -Fq ">v${version}</span>" index.html
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then test "$GITHUB_REF_NAME" = "v$version"; fi
+          if [[ -n "$RELEASE_TAG" ]]; then test "$RELEASE_TAG" = "v$version"; fi
       - name: Build Ubuntu .deb
         run: |
           python3 scripts/build_packages.py --target deb
@@ -38,6 +48,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG && format('refs/tags/{0}', env.RELEASE_TAG) || github.ref }}
       - name: Build macOS .pkg
         run: |
           python3 scripts/build_packages.py --target macos
@@ -49,7 +61,7 @@ jobs:
 
   publish-release:
     needs: [build-ubuntu, build-macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -59,13 +71,13 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
           (cd artifacts && sha256sum *.pkg *.deb > SHA256SUMS)
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" artifacts/* --clobber
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/* --clobber
           else
-            gh release create "$TAG" artifacts/* \
-              --title "Uinta Basin Air Ops Sim ${TAG}" \
-              --generate-notes
+            gh release create "$RELEASE_TAG" artifacts/* \
+              --title "Uinta Basin Air Ops Sim ${RELEASE_TAG}" \
+              --verify-tag --generate-notes
           fi
