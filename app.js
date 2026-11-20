@@ -72,7 +72,7 @@ let toastIdSeq = 0;
 // ============================================================================
 const dom = {
   simClock: document.getElementById("simClock"),
-  flightCatBadge: document.getElementById("flightCatBadge"),
+  airportConditions: document.getElementById("airportConditions"),
   metarText: document.getElementById("metarText"),
   methaneBadge: document.getElementById("methaneBadge"),
   weatherSelect: document.getElementById("weatherSelect"),
@@ -144,6 +144,15 @@ function announceScreenReader(message) {
 // ============================================================================
 // RADIO COMMS & UNOBTRUSIVE POPOVER TOAST ENGINE (persistent-toast-notifications)
 // ============================================================================
+function positionRadioToasts() {
+  let offset = 0;
+  for (const { el } of [...activeToasts].reverse()) {
+    el.style.setProperty("--toast-offset", offset + "px");
+    offset += el.getBoundingClientRect().height + 8;
+  }
+}
+const toastSizes = new ResizeObserver(positionRadioToasts);
+
 function emitRadioCall({ freq, sender, message, isGuard = false, logOnly = false }) {
   const timeStr = formatSimTime(state.simMinutes);
   const entry = { id: ++toastIdSeq, timeStr, freq, sender, message, isGuard };
@@ -188,6 +197,7 @@ function emitRadioCall({ freq, sender, message, isGuard = false, logOnly = false
 
   const record = { id: toastId, el: toast, timer: null };
   activeToasts.push(record);
+  toastSizes.observe(toast);
 
   // Keep max 3 simultaneous unobtrusive popups
   while (activeToasts.length > 3) {
@@ -228,7 +238,9 @@ function dismissToast(record, manageFocus) {
       record.el.classList.remove(":popover-open");
     }
   }
+  toastSizes.unobserve(record.el);
   record.el.remove();
+  positionRadioToasts();
 
   if (manageFocus) {
     if (activeToasts.length > 0) {
@@ -599,98 +611,106 @@ function triggerNextDynamicScenario() {
 // ============================================================================
 // SVG RENDERER 1: ASHLEY VALLEY & KVEL DLR SIGNALLING DIAGRAM
 // ============================================================================
+const surfaceNames = { "GA-HANGAR": "GA hangar", "FBO-1": "FBO 1", "FBO-2": "FBO 2",
+  "GATE-1": "Gate 1", "CARGO-PAD": "Cargo pad", "TWY-A-N": "Alpha N", "TWY-A-MID": "Alpha", "TWY-A-S": "Alpha S",
+  "RWY-17-THR": "Rwy 17", "RWY-MID": "Midfield", "RWY-35-THR": "Rwy 35" };
+
 let previousSurface = "";
 function renderKvelSvg() {
   const signature = [state.weatherId, state.selectedFlightId, ...state.blocks.map(b => b.status + ":" + (b.occupant || ""))].join("|");
   if (signature === previousSurface) return;
   previousSurface = signature;
   const wx = getWeather();
-  const blockColor = (status) => {
-    if (status === "occupied") return { fill: "#450a0a", stroke: "#ef4444", text: "#fecaca" };
-    if (status === "reserved") return { fill: "#451a03", stroke: "#f59e0b", text: "#fde68a" };
-    if (status === "closed") return { fill: "#3b0764", stroke: "#a855f7", text: "#e9d5ff" };
-    return { fill: "#062c22", stroke: "#10b981", text: "#a7f3d0" };
-  };
-
   let svg = `
     <defs>
       <pattern id="dlrGrid" width="32" height="32" patternUnits="userSpaceOnUse">
-        <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#111d30" stroke-width="1"/>
+        <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#16272d" stroke-width="1"/>
       </pattern>
     </defs>
-    <rect width="920" height="565" fill="#060c16"/>
+    <rect width="920" height="565" fill="var(--chart)"/>
     <rect width="920" height="565" fill="url(#dlrGrid)"/>
 
-    <!-- Ashley Valley Geographic Features (Accurate Relative Orientation) -->
+    <g class="valley-context">
     <!-- Asphalt Ridge (SW Terrain Wall) -->
-    <path d="M 25 270 L 145 360 L 295 545 L 25 545 Z" fill="#171e2b" stroke="#334155" stroke-width="1.5" stroke-dasharray="5 3"/>
-    <text x="42" y="458" fill="#64748b" font-family="monospace" font-size="11" font-weight="700">ASPHALT RIDGE (6,200'+)</text>
-    <text x="42" y="474" fill="#475569" font-family="monospace" font-size="9">SW Terrain / Downslope Turbulence</text>
+    <path d="M 25 270 L 145 360 L 295 545 L 25 545 Z" fill="#142127" stroke="#344b53" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="42" y="458" fill="#96abb1" font-size="11" font-weight="700">ASPHALT RIDGE (6,200'+)</text>
+    <text x="42" y="474" fill="var(--text-muted)" font-size="9">SW Terrain / Downslope Turbulence</text>
 
     <!-- Steinaker Reservoir (North) & Red Fleet (NE) -->
-    <ellipse cx="470" cy="44" rx="52" ry="18" fill="#0c2d48" stroke="#0284c7" stroke-width="1.2"/>
-    <text x="470" y="47" text-anchor="middle" fill="#7dd3fc" font-family="monospace" font-size="9">STEINAKER RES.</text>
-    <ellipse cx="785" cy="52" rx="46" ry="16" fill="#0c2d48" stroke="#0284c7" stroke-width="1.2"/>
-    <text x="785" y="55" text-anchor="middle" fill="#7dd3fc" font-family="monospace" font-size="9">RED FLEET RES.</text>
+    <ellipse cx="470" cy="44" rx="52" ry="18" fill="#142b31" stroke="#3b646c" stroke-width="1.2"/>
+    <text x="470" y="47" text-anchor="middle" fill="#9cbdc4" font-size="9">STEINAKER RES.</text>
+    <ellipse cx="785" cy="52" rx="46" ry="16" fill="#142b31" stroke="#3b646c" stroke-width="1.2"/>
+    <text x="785" y="55" text-anchor="middle" fill="#9cbdc4" font-size="9">RED FLEET RES.</text>
 
     <!-- Split Mountain / Dinosaur NM East -->
-    <path d="M 855 150 L 910 185 L 910 355 L 860 390 Z" fill="#1f1714" stroke="#78350f" stroke-width="1.2"/>
-    <text x="875" y="265" fill="#d97706" font-family="monospace" font-size="10" transform="rotate(-90 875 265)" text-anchor="middle">SPLIT MTN / DINOSAUR NM →</text>
+    <path d="M 855 150 L 910 185 L 910 355 L 860 390 Z" fill="#142127" stroke="#3e565e" stroke-width="1.2"/>
+    <text x="875" y="265" fill="#a3b9bd" font-size="10" transform="rotate(-90 875 265)" text-anchor="middle">SPLIT MTN / DINOSAUR NM →</text>
 
     <!-- US-40 Highway & Vernal Downtown -->
-    <path d="M 35 225 L 305 225 L 495 450 L 895 495" fill="none" stroke="#475569" stroke-width="3" stroke-dasharray="8 4"/>
-    <text x="72" y="216" fill="#94a3b8" font-family="monospace" font-size="10">US-40 W (Vernal Main St → Roosevelt)</text>
-    <text x="715" y="514" fill="#94a3b8" font-family="monospace" font-size="10">US-40 SE (Jensen / Ashley Creek)</text>
+    <path d="M 35 225 L 305 225 L 495 450 L 895 495" fill="none" stroke="#48616a" stroke-width="3" stroke-dasharray="8 4"/>
+    <text x="72" y="216" fill="var(--text-muted)" font-size="10">US-40 W (Vernal Main St → Roosevelt)</text>
+    <text x="715" y="514" fill="var(--text-muted)" font-size="10">US-40 SE (Jensen / Ashley Creek)</text>
 
     <!-- Ashley Creek (Fog Corridor) -->
-    <path d="M 340 20 Q 430 140 670 340 T 860 550" fill="none" stroke="#0369a1" stroke-width="2" opacity="0.55"/>
-    <text x="720" y="390" fill="#38bdf8" font-family="monospace" font-size="9" opacity="0.8">Ashley Creek (Radiation Fog Basin)</text>
+    <path d="M 340 20 Q 430 140 670 340 T 860 550" fill="none" stroke="#4c7980" stroke-width="2" opacity="0.55"/>
+    <text x="720" y="390" fill="#93b9bf" font-size="9" opacity="0.8">Ashley Creek (Radiation Fog Basin)</text>
 
-    <!-- Historical Crosswind 07/25 Ghost Strip -->
-    <line x1="425" y1="358" x2="695" y2="270" stroke="#334155" stroke-width="14" stroke-dasharray="6 4" opacity="0.5"/>
-    <text x="646" y="280" fill="#64748b" font-family="monospace" font-size="8.5" transform="rotate(-18 646 280)">OLD 07/25 (CLOSED)</text>
+    </g>
+    <!-- Historical crosswind runway -->
+    <g class="old-runway"><line x1="425" y1="358" x2="695" y2="270" stroke="#344b53" stroke-width="14" stroke-dasharray="6 4" opacity="0.5"/>
+    <text x="646" y="280" fill="#96abb1" font-size="8.5" transform="rotate(-18 646 280)">OLD 07/25 (CLOSED)</text></g>
 
-    <!-- DLR-Style Pattern & Taxi Track Interconnects -->
-    <path d="M 608 165 L 608 98 L 780 98 L 780 465 L 608 465" fill="none" stroke="#1e3a5f" stroke-width="2" stroke-dasharray="4 4"/>
-    <line x1="446" y1="202" x2="472" y2="202" stroke="#3b5380" stroke-width="3"/>
-    <line x1="446" y1="296" x2="472" y2="296" stroke="#3b5380" stroke-width="3"/>
-    <line x1="446" y1="362" x2="472" y2="362" stroke="#3b5380" stroke-width="3"/>
-    <line x1="446" y1="415" x2="472" y2="415" stroke="#3b5380" stroke-width="3"/>
-    <line x1="526" y1="194" x2="580" y2="194" stroke="#f59e0b" stroke-width="3"/>
-    <line x1="526" y1="440" x2="580" y2="440" stroke="#f59e0b" stroke-width="3"/>
+    <path d="M 444 253 H 472" fill="none" stroke="#354f59" stroke-width="3"/>
+    <path d="M 499 193 V 444" fill="none" stroke="#354f59" stroke-width="4"/>
+    <rect class="runway-base" x="578" y="163" width="60" height="304"/>
+    <path class="runway-edge" d="M 583 166 V 464 M 633 166 V 464"/>
+    <path class="threshold-bars" d="M 588 167 v 4 m 5 -4 v 4 m 5 -4 v 4 m 5 -4 v 4 m 10 -4 v 4 m 5 -4 v 4 m 5 -4 v 4 m 5 -4 v 4
+      M 588 463 v -4 m 5 4 v -4 m 5 4 v -4 m 5 4 v -4 m 10 4 v -4 m 5 4 v -4 m 5 4 v -4 m 5 4 v -4"/>
+    <!-- Pattern and taxi connections -->
+    <path class="valley-context" d="M 608 165 L 608 98 L 780 98 L 780 465 L 608 465" fill="none" stroke="#3a535c" stroke-width="2" stroke-dasharray="4 4"/>
+    <line x1="446" y1="202" x2="472" y2="202" stroke="#354f59" stroke-width="3"/>
+    <line x1="446" y1="296" x2="472" y2="296" stroke="#354f59" stroke-width="3"/>
+    <line x1="446" y1="362" x2="472" y2="362" stroke="#354f59" stroke-width="3"/>
+    <line x1="446" y1="415" x2="472" y2="415" stroke="#354f59" stroke-width="3"/>
+    <line x1="526" y1="194" x2="580" y2="194" stroke="#69868d" stroke-width="3"/>
+    <line x1="526" y1="440" x2="580" y2="440" stroke="#69868d" stroke-width="3"/>
 
     <!-- Active Wind & Runway Callout -->
-    <rect x="20" y="18" width="235" height="62" rx="5" fill="#0b1322" stroke="#243452"/>
-    <text x="30" y="36" fill="#22d3ee" font-family="monospace" font-size="11" font-weight="700">ACTIVE RWY: ${wx.activeRwy} • ${wx.flightCategory}</text>
-    <text x="30" y="52" fill="#e2e8f0" font-family="monospace" font-size="10">WIND: ${String(wx.windDir).padStart(3, "0")}° @ ${wx.windKt}${wx.gustKt ? "G" + wx.gustKt : ""} KT</text>
-    <text x="30" y="68" fill="${wx.deiceRequired ? "#fbbf24" : "#34d399"}" font-family="monospace" font-size="10">TEMP ${wx.tempC}°C • ${wx.deiceRequired ? "DE-ICE REQUIRED" : "DRY RAMP"}</text>
+    <g class="valley-context">
+    <text x="30" y="36" fill="var(--accent-cyan)" font-size="11" font-weight="700">ACTIVE RWY: ${wx.activeRwy} • ${wx.flightCategory}</text>
+    <text x="30" y="52" fill="var(--text-main)" font-size="10">WIND: ${String(wx.windDir).padStart(3, "0")}° @ ${wx.windKt}${wx.gustKt ? "G" + wx.gustKt : ""} KT</text>
+    <text x="30" y="68" fill="var(--text-muted)" font-size="10">TEMP ${wx.tempC}°C • ${wx.deiceRequired ? "DE-ICE REQUIRED" : "DRY RAMP"}</text>
+    </g>
   `;
 
   // Render Signalling Blocks
   for (const b of state.blocks) {
-    const col = blockColor(b.status);
     const hasFlight = Boolean(b.occupant && getFlight(b.occupant));
-    const isSelBlock = hasFlight && b.occupant === state.selectedFlightId;
-    const symbol = { reserved: "◇", occupied: "●", closed: "×" }[b.status];
-    const statusText = b.occupant || b.status.charAt(0).toUpperCase() + b.status.slice(1);
-    const label = symbol && b.w < 40 ? symbol : [symbol, statusText].filter(Boolean).join(" ");
+    const selected = hasFlight && b.occupant === state.selectedFlightId;
+    const symbol = { clear: "○", reserved: "◇", occupied: "●", closed: "×" }[b.status];
+    const status = b.status[0].toUpperCase() + b.status.slice(1);
+    const middle = b.x + b.w / 2;
+    const longLabel = b.occupant && b.status !== "closed" ? b.occupant : status;
+    const statusLabel = b.w < 40 ? symbol : symbol + " " + longLabel;
+    const name = surfaceNames[b.id] || b.id;
     svg += `
-      <g class="signal-block" data-block="${b.id}" ${hasFlight ? `data-flight-id="${b.occupant}" style="cursor:pointer;"` : ""}>
-        <title>${b.label} · ${b.status}${b.occupant ? " · " + b.occupant : ""}</title>
-        <rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="4"
-          fill="${col.fill}" stroke="${isSelBlock ? "#ffffff" : col.stroke}" stroke-width="${isSelBlock ? 2.5 : b.type === "runway" ? 2.2 : 1.5}"/>
-        <text x="${b.x + b.w / 2}" y="${b.y + 13}" text-anchor="middle" fill="${col.text}" font-family="monospace" font-size="8.5" font-weight="700">${b.id}</text>
-        <text x="${b.x + b.w / 2}" y="${b.y + b.h - 7}" text-anchor="middle" fill="#cbd5e1" font-family="monospace" font-size="8">
-          ${escapeHtml(label)}
-        </text>
-      </g>
-    `;
+      <g class="signal-block facility-${b.type} block-${b.status}${selected ? " is-selected" : ""}" data-block="${b.id}" ${hasFlight ? `data-flight-id="${b.occupant}"` : ""}>
+        <title>${b.label} · ${status}${b.occupant ? " · " + b.occupant : ""}</title>
+        <rect class="block-outline" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}"/>
+        ${b.type === "runway" ? `<path class="runway-stripe" d="M ${middle} ${b.y + 23} v ${b.h - 48}"/>` : ""}
+        ${selected ? `<path class="selected-mark" d="M ${b.x + .8} ${b.y + 1} v ${b.h - 2}"/>` : ""}
+        <text class="block-name" x="${middle}" y="${b.y + (b.type === "runway" ? 19 : 13)}" text-anchor="middle" font-size="${b.w < 40 ? 8 : 10}">${name}</text>
+        <text class="block-occupant" x="${middle}" y="${b.y + b.h - (b.type === "runway" ? 10 : 6)}" text-anchor="middle" font-size="${b.w < 60 ? 8 : 9}">${escapeHtml(statusLabel)}</text>
+      </g>`;
   }
-
   // Runway 17 / 35 Threshold Numbers
   svg += `
-    <text x="608" y="158" text-anchor="middle" fill="#ffffff" font-family="monospace" font-size="12" font-weight="700">17 ▼</text>
-    <text x="608" y="482" text-anchor="middle" fill="#ffffff" font-family="monospace" font-size="12" font-weight="700">▲ 35</text>
+    <text x="608" y="158" text-anchor="middle" fill="var(--text-main)" font-size="13" font-weight="700">17</text>
+    <text x="608" y="483" text-anchor="middle" fill="var(--text-main)" font-size="13" font-weight="700">35</text>
+    <g class="detail-compass" transform="translate(296 182)" fill="var(--text-muted)" text-anchor="middle">
+      <text y="-9" font-size="10" font-weight="650">N</text>
+      <path d="M 0 0 L 4.5 15 L 0 12 L -4.5 15 Z" fill="none" stroke="currentColor"/>
+    </g>
   `;
 
   dom.kvelSvg.innerHTML = svg;
@@ -701,31 +721,31 @@ function renderKvelSvg() {
 // ============================================================================
 function renderBasinBackground() {
   let svg = `
-    <rect width="1000" height="620" fill="#050a12"/>
+    <rect width="1000" height="620" fill="var(--chart)"/>
     <!-- Basin Topography Hints -->
     <!-- High Uintas North Wall -->
-    <path d="M 80 120 Q 350 75 610 115 T 920 95" fill="none" stroke="#334155" stroke-width="2" stroke-dasharray="10 4"/>
-    <text x="340" y="92" fill="#64748b" font-family="monospace" font-size="11" font-weight="700">HIGH UINTA MOUNTAINS (11,000'–13,528' MSL)</text>
+    <path d="M 80 120 Q 350 75 610 115 T 920 95" fill="none" stroke="#344b53" stroke-width="2" stroke-dasharray="10 4"/>
+    <text x="340" y="92" fill="#96abb1" font-size="15" font-weight="600">High Uinta Mountains · 11,000–13,528 ft</text>
 
     <!-- Tavaputs / Book Cliffs South Wall -->
-    <path d="M 110 495 Q 480 475 880 510" fill="none" stroke="#334155" stroke-width="2" stroke-dasharray="10 4"/>
-    <text x="370" y="510" fill="#64748b" font-family="monospace" font-size="11">TAVAPUTS PLATEAU &amp; BOOK CLIFFS</text>
+    <path d="M 110 495 Q 480 475 880 510" fill="none" stroke="#344b53" stroke-width="2" stroke-dasharray="10 4"/>
+    <text x="370" y="510" fill="#96abb1" font-size="15">Tavaputs Plateau &amp; Book Cliffs</text>
 
     <!-- Green River & White River -->
-    <path d="M 605 135 Q 690 215 700 270 Q 615 335 525 425 L 480 560" fill="none" stroke="#0369a1" stroke-width="2.2" opacity="0.55"/>
+    <path d="M 605 135 Q 690 215 700 270 Q 615 335 525 425 L 480 560" fill="none" stroke="#4c7980" stroke-width="2.2" opacity="0.55"/>
 
     <!-- V200 / J15 / J60 Regional Airways -->
-    <line x1="38" y1="245" x2="580" y2="310" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <line x1="580" y1="310" x2="960" y2="300" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <line x1="580" y1="310" x2="565" y2="590" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <line x1="580" y1="310" x2="670" y2="45" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <line x1="580" y1="310" x2="245" y2="545" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
-    <line x1="580" y1="310" x2="870" y2="565" stroke="#1e293b" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="38" y1="245" x2="580" y2="310" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="580" y1="310" x2="960" y2="300" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="580" y1="310" x2="565" y2="590" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="580" y1="310" x2="670" y2="45" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="580" y1="310" x2="245" y2="545" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="580" y1="310" x2="870" y2="565" stroke="#30474e" stroke-width="1.5" stroke-dasharray="4 4"/>
 
     <!-- 25nm & 50nm Range Rings centered on KVEL -->
-    <circle cx="580" cy="310" r="105" fill="none" stroke="#13233b" stroke-width="1.2"/>
-    <circle cx="580" cy="310" r="220" fill="none" stroke="#13233b" stroke-width="1.2"/>
-    <text x="688" y="306" fill="#334155" font-family="monospace" font-size="9">20nm KVEL</text>
+    <circle cx="580" cy="310" r="105" fill="none" stroke="#263b41" stroke-width="1.2"/>
+    <circle cx="580" cy="310" r="220" fill="none" stroke="#263b41" stroke-width="1.2"/>
+    <text x="667" y="245" fill="var(--text-muted)" font-size="13">20 NM</text>
   `;
 
   // Render Airports, Helipads & Portals
@@ -733,26 +753,26 @@ function renderBasinBackground() {
     const { x, y } = apt.coords;
     if (apt.type === "portal") {
       svg += `
-        <rect x="${x - 32}" y="${y - 14}" width="64" height="28" rx="4" fill="#1e1b4b" stroke="#818cf8" stroke-width="1.5"/>
-        <text x="${x}" y="${y + 4}" text-anchor="middle" fill="#c7d2fe" font-family="monospace" font-size="11" font-weight="700">${apt.code}</text>
+        <rect x="${x - 32}" y="${y - 14}" width="64" height="28" fill="var(--chart)" stroke="#6f919a" stroke-width="1.5"/>
+        <text x="${x}" y="${y + 4}" text-anchor="middle" fill="#b9cdd1" font-size="15" font-weight="650">${apt.code}</text>
       `;
     } else if (apt.type === "hub") {
       svg += `
-        <circle cx="${x}" cy="${y}" r="11" fill="#064e3b" stroke="#22d3ee" stroke-width="2.5"/>
-        <text x="${x + 15}" y="${y - 4}" fill="#22d3ee" font-family="monospace" font-size="12" font-weight="700">KVEL (HOME)</text>
-        <text x="${x + 15}" y="${y + 9}" fill="#94a3b8" font-family="monospace" font-size="9">5,281' • CTAF 122.8</text>
+        <circle cx="${x}" cy="${y}" r="10" fill="#17343b" stroke="var(--accent-cyan)" stroke-width="2.5"/>
+        <text x="${x + 15}" y="${y - 4}" fill="var(--accent-cyan)" font-size="15" font-weight="700">KVEL</text>
+        <text x="${x + 15}" y="${y + 9}" fill="var(--text-muted)" font-size="13">Vernal Regional</text>
       `;
     } else if (apt.type === "helipad" || apt.type === "patrol" || apt.type === "sar") {
-      const color = apt.type === "sar" ? "#ef4444" : apt.type === "patrol" ? "#f59e0b" : "#ec4899";
+      const color = "#9ebac0";
       svg += `
-        <polygon points="${x},${y - 7} ${x + 7},${y + 6} ${x - 7},${y + 6}" fill="#0f172a" stroke="${color}" stroke-width="1.8"/>
-        <text x="${x + 10}" y="${y + 4}" fill="${color}" font-family="monospace" font-size="9.5" font-weight="700">${apt.code}</text>
+        <polygon points="${x},${y - 7} ${x + 7},${y + 6} ${x - 7},${y + 6}" fill="var(--chart)" stroke="${color}" stroke-width="1.8"/>
+        <text x="${x + 10}" y="${y + 4}" fill="${color}" font-size="14" font-weight="600">${apt.code}</text>
       `;
     } else {
-      const stroke = apt.type === "regional" ? "#60a5fa" : "#34d399";
+      const stroke = apt.type === "regional" ? "#a6b9bf" : "#b4e0df";
       svg += `
-        <circle cx="${x}" cy="${y}" r="6" fill="#0f172a" stroke="${stroke}" stroke-width="1.8"/>
-        <text x="${x + 10}" y="${y + 4}" fill="${stroke}" font-family="monospace" font-size="10.5" font-weight="700">${apt.code}</text>
+        <circle cx="${x}" cy="${y}" r="6" fill="var(--chart)" stroke="${stroke}" stroke-width="1.8"/>
+        <text x="${x + 10}" y="${y + 4}" fill="${stroke}" font-size="15" font-weight="650">${apt.code}</text>
       `;
     }
   }
@@ -760,32 +780,49 @@ function renderBasinBackground() {
   dom.basinSvg.innerHTML = svg + '<g class="radar-traffic"></g>';
 }
 
+// Reserve room around fixed map symbols before placing movable aircraft labels.
+const radarFacilities = Object.values(AIRPORTS).map(({ code, type, coords: { x, y } }) => ({
+  x: x - (type === "portal" ? 35 : 10), y: y - 17,
+  w: type === "hub" ? 116 : type === "portal" ? 70 : 24 + code.length * 10, h: 35
+}));
+
+function placeRadarLabel(point, used) {
+  const width = 126, height = 36;
+  for (const offset of [0, -38, 38, -76, 76, -114, 114, -152, 152]) {
+    for (const x of [point.x + 17, point.x - width - 17]) {
+      const box = { x: Math.max(3, Math.min(997 - width, x)), y: Math.max(3, Math.min(617 - height, point.y - 18 + offset)), w: width, h: height };
+      if (used.some(b => box.x < b.x + b.w && box.x + width > b.x && box.y < b.y + b.h && box.y + height > b.y)) continue;
+      used.push(box);
+      return box;
+    }
+  }
+  return { x: Math.min(point.x + 17, 997 - width), y: Math.max(3, point.y - height) };
+}
+
 function renderBasinSvg() {
   if (!dom.basinSvg.firstElementChild) renderBasinBackground();
+  const used = [...radarFacilities, ...state.flights.map(f => ({ x: f.pos.x - 7, y: f.pos.y - 7, w: 14, h: 14 }))];
   let svg = "";
   for (const f of state.flights) {
     const isSel = f.id === state.selectedFlightId;
     const isEmg = f.state === "EMERGENCY" || f.squawk === "7700";
-    const color = isEmg
-      ? "#ef4444"
-      : f.category === "contour"
-      ? "#22d3ee"
-      : f.category === "cargo"
-      ? "#fbbf24"
-      : f.category === "medevac" || f.category === "sar"
-      ? "#f472b6"
-      : "#4ade80";
+    const color = isEmg ? "#ffaaa7" : isSel ? "var(--accent-cyan)" : "#add1d5";
 
     const rad = ((f.heading - 90) * Math.PI) / 180;
     const vx = f.pos.x + Math.cos(rad) * (f.speedKt > 0 ? 18 : 0);
     const vy = f.pos.y + Math.sin(rad) * (f.speedKt > 0 ? 18 : 0);
 
+    const label = placeRadarLabel(f.pos, used);
+    const nearX = label.x > f.pos.x ? label.x : label.x + 120;
     svg += `
-      <g class="radar-target" data-flight-id="${f.id}" style="cursor:pointer;">
-        ${f.speedKt > 0 ? `<line x1="${f.pos.x}" y1="${f.pos.y}" x2="${vx}" y2="${vy}" stroke="${color}" stroke-width="1.5"/>` : ""}
-        <circle cx="${f.pos.x}" cy="${f.pos.y}" r="${isSel ? 7 : 5}" fill="${color}" stroke="${isSel ? "#ffffff" : "#050a12"}" stroke-width="${isSel ? 2 : 1}"/>
-        <text x="${f.pos.x + 10}" y="${f.pos.y - 6}" fill="${color}" font-family="monospace" font-size="9.5" font-weight="700">${f.id}</text>
-        <text x="${f.pos.x + 10}" y="${f.pos.y + 5}" fill="#cbd5e1" font-family="monospace" font-size="8.5">${Math.round(f.altFt / 100)} ${f.speedKt}kt →${f.dest}</text>
+      <g class="radar-target" data-flight-id="${f.id}">
+        <title>${escapeHtml(f.callsign)} · ${f.altFt.toLocaleString()} ft · ${f.speedKt} kt · ${f.dest}</title>
+        <path d="M ${f.pos.x} ${f.pos.y} L ${nearX} ${label.y + 15}" fill="none" stroke="#486169" stroke-width="1"/>
+        ${f.speedKt > 0 ? `<line x1="${f.pos.x}" y1="${f.pos.y}" x2="${vx}" y2="${vy}" stroke="${color}" stroke-width="2"/>` : ""}
+        <circle cx="${f.pos.x}" cy="${f.pos.y}" r="4.5" fill="${color}"/>
+        ${isSel ? `<circle cx="${f.pos.x}" cy="${f.pos.y}" r="9" fill="none" stroke="var(--accent-cyan)" stroke-width="2"/>` : ""}
+        <text class="radar-label" x="${label.x + 2}" y="${label.y + 14}" fill="${color}" font-size="15" font-weight="700">${f.id}</text>
+        <text class="radar-label" x="${label.x + 2}" y="${label.y + 29}" fill="var(--text-muted)" font-size="13">${Math.round(f.altFt / 100)} · ${f.speedKt} kt → ${f.dest}</text>
       </g>
     `;
   }
@@ -816,7 +853,7 @@ function renderFlightTable() {
     row.querySelector("button").setAttribute("aria-pressed", String(selected));
     const values = [
       `${f.origin} → ${f.dest}<br>Alt. ${f.alternate}`,
-      `<span class="state-pill state-${f.state}">${f.state}</span><br>${f.blockId || "AIRSPACE"}`,
+      `<span class="state-label state-${f.state}">${f.state}</span><br>${f.blockId || "AIRSPACE"}`,
       `${f.altFt.toLocaleString()}'<br>${f.speedKt} kt`,
       `${f.squawk}<br>${f.freq}`
     ];
@@ -836,11 +873,11 @@ function renderRoleWorkstation() {
   const sel = getFlight(state.selectedFlightId) || state.flights[0];
 
   const titles = {
-    armchair: ["Armchair Mode — Autonomous AI Director", "AI AUTO: ON"],
-    dispatcher: ["Flight Dispatch", "VERNAL • KVEL"],
-    fbo: ["FBO & Ramp Agent — Vernal Jet Center (KVEL)", "RAMP CONTROL"],
-    tsa: ["TSA & Airline Ticketing — KVEL Terminal Gate 1", "CHECKPOINT LIVE"],
-    pilot: ["Pilot Command — Active Flight Deck", "PILOT IN COMMAND"]
+    armchair: ["Armchair Director", "Autonomous operations"],
+    dispatcher: ["Flight Dispatch", "Vernal · KVEL"],
+    fbo: ["FBO & Ramp", "Vernal Jet Center · KVEL"],
+    tsa: ["TSA & Ticketing", "Gate 1 · KVEL"],
+    pilot: ["Pilot Command", "Flight deck"]
   };
   dom.rolePanelTitle.textContent = titles[state.role][0];
   dom.roleAiBadge.textContent = titles[state.role][1];
@@ -848,17 +885,17 @@ function renderRoleWorkstation() {
   if (state.role === "armchair") {
     dom.roleDeskBody.innerHTML = `
       <div class="role-card">
-        <h3>Autonomous Basin Operations Overview</h3>
-        <p style="margin:0 0 0.5rem 0; font-size:0.8rem; color:var(--text-muted);">${escapeHtml(wx.summary)}</p>
-        <div style="display:flex; flex-wrap:wrap; gap:0.4rem;">
-          <button type="button" class="btn btn-amber" id="armchairScenBtn">⚡ Inject Dynamic Incident</button>
-          <button type="button" class="btn" id="armchairMethaneBtn">🛰️ Trigger Methane Plume Call</button>
-          <button type="button" class="btn btn-crimson" id="armchair7700Btn">🚨 Inject 7700 Icing Emergency</button>
+        <h3>Basin operations</h3>
+        <p class="desk-copy">${escapeHtml(wx.summary)}</p>
+        <div class="action-row">
+          <button type="button" class="btn" id="armchairScenBtn">Inject Dynamic Incident</button>
+          <button type="button" class="btn" id="armchairMethaneBtn">Trigger Methane Plume Call</button>
+          <button type="button" class="btn" id="armchair7700Btn">Inject 7700 Icing Emergency</button>
         </div>
       </div>
       <div class="role-card">
-        <h3>Selected Target Telemetry: ${escapeHtml(sel.callsign)}</h3>
-        <p style="margin:0; font-size:0.78rem; font-family:var(--font-mono); color:var(--text-muted);">
+        <h3>Selected aircraft · ${escapeHtml(sel.callsign)}</h3>
+        <p class="desk-copy">
           ${escapeHtml(sel.type)} (${sel.tail}) • ${sel.origin} → ${sel.dest} • Fuel: ${sel.fuelLbs} lbs • Pax: ${sel.paxCount} • Cargo: ${sel.cargoLbs} lbs<br>
           Notes: ${escapeHtml(sel.pilotNotes)}
         </p>
@@ -886,12 +923,12 @@ function renderRoleWorkstation() {
     dom.roleDeskBody.innerHTML = `
       <div class="role-card">
         <h3>KVEL Runway 17/35 &amp; Surface Ops</h3>
-        <p style="margin:0 0 0.5rem 0; font-size:0.78rem; color:var(--text-muted);">
+        <p class="desk-copy">
           Runway Status: <strong>${state.rwyClosedTicks > 0 ? "CLOSED (" + state.rwyCloseReason + ")" : "OPEN — Active Rwy " + wx.activeRwy}</strong>
         </p>
-        <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
-          <button type="button" class="btn btn-amber" id="fboWildlifeBtn">🦌 Run Wildlife / FOD Sweep (Close Rwy)</button>
-          <button type="button" class="btn btn-emerald" id="fboOpenRwyBtn">✅ Clear &amp; Reopen Rwy 17/35</button>
+        <div class="action-row">
+          <button type="button" class="btn" id="fboWildlifeBtn">Run Wildlife / FOD Sweep (Close Rwy)</button>
+          <button type="button" class="btn" id="fboOpenRwyBtn">Clear &amp; Reopen Rwy 17/35</button>
         </div>
       </div>
       ${
@@ -900,20 +937,20 @@ function renderRoleWorkstation() {
               .map(
                 (f) => `
           <div class="role-card">
-            <h3><span>${f.blockId}: ${escapeHtml(f.callsign)}</span><span style="font-size:0.72rem;color:var(--accent-cyan);">${f.type}</span></h3>
-            <div style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:0.45rem;">
-              Fuel: ${f.fueled ? "✅ Serviced" : "⛽ Needs Jet-A/100LL"} | De-Ice: ${f.deiced ? "✅ Sprayed" : wx.deiceRequired ? "❄️ Frost Present" : "✅ Clear"}
+            <h3><span>${f.blockId}: ${escapeHtml(f.callsign)}</span><span class="desk-tag">${f.type}</span></h3>
+            <div class="desk-copy">
+              Fuel: ${f.fueled ? "Serviced" : "Needs Jet-A/100LL"} | De-Ice: ${f.deiced ? "Sprayed" : wx.deiceRequired ? "Frost Present" : "Clear"}
             </div>
-            <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
-              <button type="button" class="btn" data-fbo-fuel="${f.id}">⛽ Dispatch Fuel Truck</button>
-              <button type="button" class="btn btn-amber" data-fbo-deice="${f.id}">❄️ Type I/IV De-Ice Spray</button>
-              <button type="button" class="btn btn-emerald" data-fbo-marshall="${f.id}">🦺 Marshall to TWY Alpha</button>
+            <div class="action-row">
+              <button type="button" class="btn" data-fbo-fuel="${f.id}">Dispatch Fuel Truck</button>
+              <button type="button" class="btn" data-fbo-deice="${f.id}">Type I/IV De-Ice Spray</button>
+              <button type="button" class="btn" data-fbo-marshall="${f.id}">Marshall to TWY Alpha</button>
             </div>
           </div>
         `
               )
               .join("")
-          : `<div class="role-card"><p style="margin:0; font-size:0.8rem; color:var(--text-muted);">All KVEL ramp stands (Gate 1, Vernal Jet Center, Cargo Pad, GA Hangar) are currently clear — awaiting next arrival.</p></div>`
+          : `<div class="role-card"><p class="desk-copy">All KVEL ramp stands (Gate 1, Vernal Jet Center, Cargo Pad, GA Hangar) are currently clear — awaiting next arrival.</p></div>`
       }
     `;
     document.getElementById("fboWildlifeBtn")?.addEventListener("click", () => {
@@ -972,29 +1009,29 @@ function renderRoleWorkstation() {
     dom.roleDeskBody.innerHTML = `
       <div class="role-card">
         <h3>Contour VTE3101 (KVEL → KPHX) Boarding &amp; Checkpoint</h3>
-        <p style="margin:0; font-size:0.78rem; font-family:var(--font-mono); color:var(--accent-cyan);">
+        <p class="desk-copy">
           Gate 1 Cleared Pax: ${vte ? vte.tsaClearedPax : 0} / ${vte ? vte.tsaTotalPax : 27} • Inspect ID, Checked Firearms/Hazmat, &amp; X-Ray Carry-Ons
         </p>
       </div>
       ${state.passengers
         .map(
           (p) => `
-          <div class="role-card" style="opacity:${p.status === "pending" ? 1 : 0.65};">
-            <h3><span>${escapeHtml(p.name)} — ${escapeHtml(p.role)}</span><span class="state-pill state-${p.status === "pending" ? "HOLD_SHORT" : "TAKEOFF"}">${p.status.toUpperCase()}</span></h3>
-            <div style="font-size:0.75rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:0.45rem;">
+          <div class="role-card">
+            <h3><span>${escapeHtml(p.name)} — ${escapeHtml(p.role)}</span><span class="state-label state-${p.status === "pending" ? "HOLD_SHORT" : "TAKEOFF"}">${p.status.toUpperCase()}</span></h3>
+            <div class="desk-copy">
               ID: ${escapeHtml(p.idStatus)}<br>
               Checked: ${escapeHtml(p.checkedBag)}<br>
-              X-Ray Carry-On: <span style="color:#fde68a;">${escapeHtml(p.carryOn)}</span>
+              X-Ray Carry-On: ${escapeHtml(p.carryOn)}
             </div>
             ${
               p.status === "pending"
-                ? `<div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
-                    <button type="button" class="btn btn-emerald" data-tsa-act="clear" data-pax="${p.id}">✅ Clear to Gate 1</button>
-                    <button type="button" class="btn btn-amber" data-tsa-act="require_declaration" data-pax="${p.id}">📋 Counter Declaration / Repack</button>
-                    <button type="button" class="btn btn-amber" data-tsa-act="secondary_search" data-pax="${p.id}">🔍 Confiscate Hazmat / Secondary</button>
-                    <button type="button" class="btn btn-crimson" data-tsa-act="deny_boarding" data-pax="${p.id}">🚫 Deny Boarding &amp; Call LEO</button>
+                ? `<div class="action-row">
+                    <button type="button" class="btn" data-tsa-act="clear" data-pax="${p.id}">Clear to Gate 1</button>
+                    <button type="button" class="btn" data-tsa-act="require_declaration" data-pax="${p.id}">Counter Declaration / Repack</button>
+                    <button type="button" class="btn" data-tsa-act="secondary_search" data-pax="${p.id}">Confiscate Hazmat / Secondary</button>
+                    <button type="button" class="btn" data-tsa-act="deny_boarding" data-pax="${p.id}">Deny Boarding &amp; Call LEO</button>
                   </div>`
-                : `<div style="font-size:0.74rem; color:#6ee7b7;">Outcome: ${escapeHtml(p.issue)}</div>`
+                : `<div class="desk-outcome">Outcome: ${escapeHtml(p.issue)}</div>`
             }
           </div>
         `
@@ -1027,21 +1064,21 @@ function renderRoleWorkstation() {
   // PILOT COMMAND ROLE
   dom.roleDeskBody.innerHTML = `
     <div class="role-card">
-      <h3>Active Cockpit: ${escapeHtml(sel.callsign)} (${escapeHtml(sel.type)})</h3>
-      <div style="font-size:0.76rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:0.55rem;">
+      <h3>Active cockpit · ${escapeHtml(sel.callsign)} (${escapeHtml(sel.type)})</h3>
+      <div class="desk-copy">
         Route: <strong>${sel.origin} → ${sel.dest}</strong> | State: <strong>${sel.state}</strong> | Alt: ${sel.altFt.toLocaleString()}' | Spd: ${sel.speedKt} kt | Squawk: <strong>${sel.squawk}</strong><br>
         Mission: ${escapeHtml(sel.pilotNotes)}
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem; margin-bottom:0.55rem;">
-        <label style="font-size:0.74rem; font-family:var(--font-mono);">Destination Airport / LZ
-          <select id="pilotDestSelect" class="btn" style="width:100%; margin-top:0.2rem;">
+      <div class="field-pair">
+        <label>Destination Airport / LZ
+          <select id="pilotDestSelect" class="btn">
             ${Object.values(AIRPORTS)
               .map((a) => `<option value="${a.code}" ${a.code === sel.dest ? "selected" : ""}>${a.code} — ${escapeHtml(a.name.slice(0, 26))}</option>`)
               .join("")}
           </select>
         </label>
-        <label style="font-size:0.74rem; font-family:var(--font-mono);">Transponder Squawk
-          <select id="pilotSquawkSelect" class="btn" style="width:100%; margin-top:0.2rem;">
+        <label>Transponder Squawk
+          <select id="pilotSquawkSelect" class="btn">
             ${["1200","4215","7700","7600"].includes(sel.squawk) ? "" : `<option value="${escapeHtml(sel.squawk)}" selected>${escapeHtml(sel.squawk)} (assigned)</option>`}
             <option value="1200" ${sel.squawk === "1200" ? "selected" : ""}>1200 (VFR Basin)</option>
             <option value="4215" ${sel.squawk === "4215" ? "selected" : ""}>4215 (IFR ZLC)</option>
@@ -1050,16 +1087,16 @@ function renderRoleWorkstation() {
           </select>
         </label>
       </div>
-      <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
-        <button type="button" class="btn btn-emerald" id="pilotLaunchBtn">🛫 Taxi / Takeoff / Fly to Dest</button>
-        <button type="button" class="btn" id="pilotPatternBtn">🔄 Fly KVEL Rwy ${wx.activeRwy} Pattern</button>
-        <button type="button" class="btn btn-amber" id="pilotCtafBtn">📻 Announce Position on CTAF</button>
-        <button type="button" class="btn btn-crimson" id="pilotMaydayBtn">🚨 Declare 7700 Emergency</button>
+      <div class="action-row">
+        <button type="button" class="btn" id="pilotLaunchBtn">Taxi / Takeoff / Fly to Dest</button>
+        <button type="button" class="btn" id="pilotPatternBtn">Fly KVEL Rwy ${wx.activeRwy} Pattern</button>
+        <button type="button" class="btn" id="pilotCtafBtn">Announce Position on CTAF</button>
+        <button type="button" class="btn" id="pilotMaydayBtn">Declare 7700 Emergency</button>
       </div>
     </div>
     <div class="role-card">
-      <h3>Quick-Select Pilot Missions (All Requested Aircraft Types)</h3>
-      <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
+      <h3>Pilot missions</h3>
+      <div class="action-row">
         ${state.flights
           .map((f) => `<button type="button" class="btn ${f.id === sel.id ? "active" : ""}" data-pick-pilot="${f.id}">${f.id} (${f.category.replace("_", " ")})</button>`)
           .join("")}
@@ -1168,8 +1205,8 @@ function renderRadioLog() {
           : "";
       return `
         <div class="radio-entry ${cls}">
-          <div><span class="freq-chip">${entry.freq}</span> <strong>${escapeHtml(entry.sender)}</strong> <span style="color:var(--text-muted);">[${entry.timeStr}]</span></div>
-          <div style="color:#dce7f7; margin-top:2px;">"${escapeHtml(entry.message)}"</div>
+          <div class="radio-meta"><span class="freq-chip">${entry.freq}</span><strong>${escapeHtml(entry.sender)}</strong><time>${entry.timeStr}</time></div>
+          <p class="radio-message">${escapeHtml(entry.message)}</p>
         </div>
       `;
     })
@@ -1184,11 +1221,18 @@ function renderHeaderAndWeather() {
       " · " + (state.rwyClosedTicks > 0 ? "Runway closed" : "Runway " + wx.activeRwy + " active");
     if (label !== dom.dispatchMapLabel.textContent) dom.dispatchMapLabel.textContent = label;
   }
-  dom.flightCatBadge.textContent = wx.flightCategory;
-  dom.flightCatBadge.className = `flight-cat-badge cat-${wx.flightCategory}`;
+  if (dom.airportConditions.dataset.weather === wx.id) return;
+  dom.airportConditions.dataset.weather = wx.id;
+  const localConditions = { KVEL: wx.flightCategory, ...wx.nearbyCategories };
+  dom.airportConditions.innerHTML = Object.entries(localConditions).map(([code, category]) => {
+    const airport = AIRPORTS[code];
+    return `<li class="station"><div class="station-line"><strong class="station-code">${code}</strong>
+      <span class="flight-category cat-${category}">${category}</span></div>
+      <span class="station-name">${escapeHtml(airport.name.replace(/ Airport$/, ""))}</span></li>`;
+  }).join("");
   dom.metarText.textContent = wx.metar;
-  dom.methaneBadge.textContent = `• Basin CH4/Inversion: ${wx.methaneTrapping}`;
-  dom.wxBriefingNote.textContent = `Current Active Weather Regime: ${wx.name} — ${wx.summary}`;
+  dom.methaneBadge.textContent = `Basin methane · ${wx.methaneTrapping}`;
+  dom.wxBriefingNote.textContent = wx.summary;
 }
 
 function renderAirportDirectory() {
@@ -1259,7 +1303,7 @@ function setView(view) {
 function setSurfaceExtent() {
   const dispatch = state.role === "dispatcher";
   const closeUp = dispatch && state.surfaceDetail;
-  dom.kvelSvg.setAttribute("viewBox", closeUp ? "325 140 355 358" : "0 0 920 565");
+  dom.kvelSvg.setAttribute("viewBox", closeUp ? "270 141 435 354" : "0 0 920 565");
   dom.kvelSvg.classList.toggle("airfield-detail", closeUp);
   dom.surfaceExtent.hidden = dom.dispatchMapLabel.hidden = !dispatch;
   dom.surfaceExtent.textContent = closeUp ? "Show full valley" : "Show airfield detail";

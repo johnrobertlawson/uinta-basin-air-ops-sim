@@ -247,9 +247,11 @@ export const KVEL_BLOCKS = [
 // WEATHER SCENARIOS (INSPIRED BY PAST-MONTH OCT/NOV UINTA BASIN METEOROLOGY)
 // Integrates with USU Bingham Research Center snow-depth/inversion dynamics
 // ============================================================================
+// Nearby categories are fixed scenario values for the conditions display.
 export const WEATHER_REGIMES = [
   {
     id: "inversion_fog",
+    nearbyCategories: { "74V": "IFR", "U69": "MVFR", "33U": "VFR", "4V0": "MVFR" },
     name: "Late-Autumn Basin Cold Pool & Freezing Fog",
     metar: "KVEL 181453Z AUTO 15003KT 1/2SM FZFG VV003 M04/M05 A3034 RMK AO2 FZRAE1418SLP298",
     tempC: -4,
@@ -268,6 +270,7 @@ export const WEATHER_REGIMES = [
   },
   {
     id: "uinta_cold_front",
+    nearbyCategories: { "74V": "MVFR", "U69": "IFR", "33U": "IFR", "4V0": "VFR" },
     name: "Uinta Mountain Cold Front & Gusty Crosswinds",
     metar: "KVEL 181953Z AUTO 26024G35KT 5SM -SHSN BKN026 OVC042 M01/M08 A2976 RMK AO2 PK WND 27035/1941",
     tempC: -1,
@@ -286,6 +289,7 @@ export const WEATHER_REGIMES = [
   },
   {
     id: "crisp_high_pressure",
+    nearbyCategories: { "74V": "VFR", "U69": "VFR", "33U": "VFR", "4V0": "VFR" },
     name: "Crisp High-Pressure Frosty Morning",
     metar: "KVEL 181553Z AUTO 34005KT 10SM FEW120 M07/M13 A3042 RMK AO2 SLP324 T10721128",
     tempC: -7,
@@ -304,6 +308,7 @@ export const WEATHER_REGIMES = [
   },
   {
     id: "mild_basin_vfr",
+    nearbyCategories: { "74V": "VFR", "U69": "VFR", "33U": "VFR", "4V0": "VFR" },
     name: "Sunny Autumn Basin Patrol & Training Day",
     metar: "KVEL 182053Z AUTO 17008KT 10SM CLR 11/M04 A3018 RMK AO2 SLP215",
     tempC: 11,

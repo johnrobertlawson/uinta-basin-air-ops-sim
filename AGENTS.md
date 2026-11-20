@@ -11,8 +11,8 @@
 | File | Responsibility |
 | --- | --- |
 | `index.html` | Semantic layout, role/view switchers, dual SVG containers, `<dialog id="airportDialog" closedby="any">`, `#radioToastRegion`. |
-| `styles.css` | Dark DLR signalling theme, popover toast transitions, `content-visibility: auto` board columns, modal styles, WCAG reflow/reduced-motion. |
-| `data.js` | Static domain data: `AIRPORTS`, `KVEL_BLOCKS`, `WEATHER_REGIMES`, `INITIAL_FLIGHTS`, `PASSENGER_QUEUE`, `DYNAMIC_SCENARIOS`. |
+| `styles.css` | Flat cyan-on-dark dispatch theme, bundled DM Sans and Bungee Tint wordmark (Helvetica fallback), popover toast transitions, `content-visibility: auto` board columns, modal styles, WCAG reflow/reduced-motion. |
+| `data.js` | Scenario-specific categories for the four nearby airports and static domain data: `AIRPORTS`, `KVEL_BLOCKS`, `WEATHER_REGIMES`, `INITIAL_FLIGHTS`, `PASSENGER_QUEUE`, `DYNAMIC_SCENARIOS`. |
 | `app.js` | Simulation loop (`900ms` tick), DLR block sync, Armchair AI Director, radio popover toast manager, dual SVG renderers, 5 role workstations. |
 | `dispatch.js` / `dispatch-desk.js` | Shared departure decisions and unpaused relief clock / keyboard-selectable flight strips and crew reports. |
 | `VERSION` | Single source of truth (`MAJOR.MINOR.PATCH`) read by `scripts/build_packages.py` and mirrored in `index.html`. |
@@ -27,7 +27,7 @@
    - Modal uses native `<dialog closedby="any">`, `command="show-modal"`, `getBoundingClientRect()` fallback, and `dialog.returnValue = ""` reset on `close`.
    - Never use volatile/experimental CSS `scroll-axis-lock` without explicit user opt-in.
 4. **Runway consistency:** Always derive active runway (`17` or `35`) from `getWeather().activeRwy`; never hardcode `35` in hold-short, pattern, or missed-approach logic.
-5. **Versioning:** When bumping a release, update `VERSION` and the header badge in `index.html`, then tag `v<VERSION>`.
+5. **Versioning:** When bumping a release, update `VERSION` and the header version in `index.html`, then tag `v<VERSION>`.
 6. **Dispatch:** A ready flight requests release once per readiness period. Use unpaused real milliseconds for relief in every speed mode. An explicit hold survives role changes until the dispatcher releases it. Requests go to the strip and written log.
 
 ## Verification & Packaging

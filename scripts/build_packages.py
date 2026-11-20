@@ -21,7 +21,11 @@ DIST_DIR = ROOT / "dist"
 PKG_NAME = "uinta-basin-air-ops-sim"
 APP_DISPLAY_NAME = "Uinta Basin Air Ops Sim"
 BUNDLE_ID = "io.github.johnrobertlawson.uinta-basin-air-ops-sim"
-WEB_FILES = ["index.html", "styles.css", "app.js", "data.js", "dispatch.js", "dispatch-desk.js", "VERSION"]
+WEB_FILES = [
+    "index.html", "styles.css", "app.js", "data.js", "dispatch.js", "dispatch-desk.js", "VERSION",
+    "assets/icon.svg", "assets/fonts/dm-sans-latin.woff2", "assets/fonts/bungee-tint-latin.woff2",
+    "assets/fonts/DM-Sans-OFL.txt", "assets/fonts/Bungee-Tint-OFL.txt",
+]
 
 
 def read_version() -> str:
@@ -206,7 +210,9 @@ nohup "$PYTHON_BIN" "$RES_DIR/launcher.py" "$RES_DIR/web" > "$LOG_DIR/server.log
         shutil.copyfile(ROOT / "scripts" / "launcher.py", res_dir / "launcher.py")
         shutil.copyfile(ROOT / "assets" / "icon.svg", res_dir / "icon.svg")
         for fname in WEB_FILES:
-            shutil.copyfile(ROOT / fname, web_dir / fname)
+            destination = web_dir / fname
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / fname, destination)
 
         subprocess.run(["xattr", "-cr", str(payload_root)], check=False)
 
