@@ -6,16 +6,13 @@ import {
   PASSENGER_QUEUE,
   DYNAMIC_SCENARIOS
 } from "./data.js";
+import { PlayClock, advanceSurfaceDeparture, departureNeeds, divertFlight, holdDeparture, isDeparture, releaseFlight, updateReleases } from "./dispatch.js";
+import { renderDispatchDesk } from "./dispatch-desk.js";
 
 // ============================================================================
 // MODERN WEB GUIDANCE CONDITIONAL POLYFILLS & FALLBACKS
 // ============================================================================
-if (!Object.hasOwn(HTMLElement.prototype, "popover")) {
-  import("https://unpkg.com/@oddbird/popover-polyfill@latest/dist/popover.min.js").catch(() => {});
-}
-if (!("commandForElement" in HTMLButtonElement.prototype)) {
-  import("https://unpkg.com/invokers-polyfill@latest/invoker.min.js").catch(() => {});
-}
+// Native controls have local fallbacks so the packaged simulator also runs offline.
 
 // Dialog closedby="any" fallback (only when native closedBy is missing)
 if (!("closedBy" in HTMLDialogElement.prototype)) {
@@ -37,23 +34,33 @@ if (!("closedBy" in HTMLDialogElement.prototype)) {
 // ============================================================================
 // SIMULATION STATE
 // ============================================================================
+function initialFleet(activeRwy = WEATHER_REGIMES[0].activeRwy) {
+  return INITIAL_FLIGHTS.map(f => ({
+    ...f, pos: { ...f.pos },
+    blockId: f.blockId === "RNAV-35-FINAL" && activeRwy === "17" ? "FINAL-17" : f.blockId,
+    parkedAt: ["PARKED", "BOARDING"].includes(f.state) ? f.origin : null
+  }));
+}
+
+const playClock = new PlayClock();
 const state = {
   simMinutes: 7 * 60 + 5, // 07:05 MST
   speed: 1,
   role: "armchair", // armchair | dispatcher | fbo | tsa | pilot
   view: "split", // split | kvel | basin
+  surfaceDetail: true,
   weatherId: "inversion_fog",
   radioPopupsEnabled: true,
   selectedFlightId: "VTE3101",
   blocks: KVEL_BLOCKS.map((b) => ({ ...b })),
-  flights: INITIAL_FLIGHTS.map((f) => ({ ...f, pos: { ...f.pos } })),
+  flights: initialFleet(),
   passengers: PASSENGER_QUEUE.map((p) => ({ ...p })),
   radioLog: [],
   rwyClosedTicks: 0,
   rwyCloseReason: "",
   tickCount: 0,
   scenarioIndex: 0,
-  aiCooldown: 0,
+  nextCrewMinute: 7 * 60 + 6,
   lastFocusedBeforeToast: null
 };
 
@@ -75,11 +82,17 @@ const dom = {
   basinRadarBox: document.getElementById("basinRadarBox"),
   kvelSvg: document.getElementById("kvelSvg"),
   basinSvg: document.getElementById("basinSvg"),
+  surfaceExtent: document.getElementById("surfaceExtent"),
+  dispatchMapLabel: document.getElementById("dispatchMapLabel"),
   flightTableBody: document.getElementById("flightTableBody"),
   opsCountBadge: document.getElementById("opsCountBadge"),
   rolePanelTitle: document.getElementById("rolePanelTitle"),
   roleAiBadge: document.getElementById("roleAiBadge"),
   roleDeskBody: document.getElementById("roleDeskBody"),
+  dispatchPanel: document.getElementById("dispatchPanel"),
+  workspace: document.querySelector(".workspace-grid"),
+  workstation: document.getElementById("workstation"),
+  trafficDetails: document.getElementById("trafficDetails"),
   radioLogFeed: document.getElementById("radioLogFeed"),
   radioToastRegion: document.getElementById("radioToastRegion"),
   srAnnouncement: document.getElementById("srAnnouncement"),
@@ -131,7 +144,7 @@ function announceScreenReader(message) {
 // ============================================================================
 // RADIO COMMS & UNOBTRUSIVE POPOVER TOAST ENGINE (persistent-toast-notifications)
 // ============================================================================
-function emitRadioCall({ freq, sender, message, isGuard = false }) {
+function emitRadioCall({ freq, sender, message, isGuard = false, logOnly = false }) {
   const timeStr = formatSimTime(state.simMinutes);
   const entry = { id: ++toastIdSeq, timeStr, freq, sender, message, isGuard };
   state.radioLog.unshift(entry);
@@ -139,6 +152,10 @@ function emitRadioCall({ freq, sender, message, isGuard = false }) {
   renderRadioLog();
 
   // Suppress popups if user disabled them OR a modal dialog is open
+  if (logOnly) {
+    announceScreenReader(message);
+    return;
+  }
   if (!state.radioPopupsEnabled || isAnyModalOpen()) return;
 
   const toastId = `radio-toast-${entry.id}`;
@@ -263,7 +280,7 @@ function syncSignallingBlocks() {
 
   // Reserve runway if any flight is on final approach or holding short
   const rwyBusy = state.flights.some((f) => ["TAKEOFF", "LANDING"].includes(f.state));
-  const rwyApproach = state.flights.some((f) => ["RNAV-35-FINAL", "HS-35", "HS-17"].includes(f.blockId));
+  const rwyApproach = state.flights.some((f) => ["RNAV-35-FINAL", "FINAL-17", "HS-35", "HS-17"].includes(f.blockId));
   if (!rwyBusy && rwyApproach && state.rwyClosedTicks <= 0) {
     const activeThr = getWeather().activeRwy === "17" ? "RWY-17-THR" : "RWY-35-THR";
     for (const id of [activeThr, "RWY-MID"]) {
@@ -295,7 +312,6 @@ function stepSimulation() {
   }
 
   const wx = getWeather();
-  const isArmchair = state.role === "armchair";
 
   for (const f of state.flights) {
     // 1. Move enroute / approaching aircraft on Basin Radar
@@ -316,18 +332,20 @@ function stepSimulation() {
         }
       } else {
         handleArrival(f, wx);
+        continue;
       }
 
       // Entering KVEL final approach block
-      if (f.dest === "KVEL" && dist < 85 && f.blockId !== "RNAV-35-FINAL" && f.state !== "LANDING") {
-        f.blockId = "RNAV-35-FINAL";
+      const finalBlock = wx.activeRwy === "17" ? "FINAL-17" : "RNAV-35-FINAL";
+      if (f.dest === "KVEL" && dist < 85 && f.blockId !== finalBlock) {
+        f.blockId = finalBlock;
         f.state = f.state === "EMERGENCY" ? "EMERGENCY" : "APPROACH";
         f.freq = "122.800";
         f.targetAltFt = 5500;
         emitRadioCall({
           freq: "122.800",
           sender: f.callsign,
-          message: `Vernal Traffic, ${f.callsign} 5 miles south on RNAV Runway ${wx.activeRwy} straight-in, ${wx.flightCategory} conditions, Vernal.`
+          message: `Vernal Traffic, ${f.callsign} on final for Runway ${wx.activeRwy}, ${wx.flightCategory} conditions, Vernal.`
         });
       }
     }
@@ -360,45 +378,16 @@ function stepSimulation() {
       }
     }
 
-    // 3. Surface Movement Progression (TAXI_OUT -> HOLD_SHORT -> TAKEOFF -> ENROUTE)
-    if (f.state === "TAXI_OUT" && state.tickCount % 10 === 0) {
-      f.blockId = wx.activeRwy === "35" ? "HS-35" : "HS-17";
-      f.state = "HOLD_SHORT";
-      emitRadioCall({
-        freq: "122.800",
-        sender: f.callsign,
-        message: `Vernal Traffic, ${f.callsign} holding short Runway ${wx.activeRwy} at Alpha, ready for departure.`
-      });
-    } else if (f.state === "HOLD_SHORT" && state.tickCount % 12 === 0 && state.rwyClosedTicks <= 0) {
-      const rwyFree = !state.flights.some((o) => o.id !== f.id && ["RWY-35-THR", "RWY-MID", "RWY-17-THR"].includes(o.blockId));
-      if (rwyFree) {
-        f.state = "TAKEOFF";
-        f.blockId = "RWY-MID";
-        f.speedKt = 110;
-        emitRadioCall({
-          freq: "122.800",
-          sender: f.callsign,
-          message: `Vernal Traffic, ${f.callsign} departing Runway ${wx.activeRwy}, climbing on course to ${f.dest}.`
-        });
-      }
-    } else if (f.state === "TAKEOFF" && state.tickCount % 8 === 0) {
-      f.state = "ENROUTE";
-      f.blockId = null;
-      f.altFt = 6800;
-      f.speedKt = f.category === "contour" || f.category === "private_jet" ? 260 : f.category === "cargo" ? 185 : 120;
-      f.freq = "135.775";
-      emitRadioCall({
-        freq: "135.775",
-        sender: f.callsign,
-        message: `Salt Lake Center, ${f.callsign} off Vernal passing 6,800 climbing ${f.targetAltFt.toLocaleString()} direct ${f.dest}.`
-      });
-    }
+    advanceSurfaceDeparture(f, state, wx, emitRadioCall);
   }
 
-  // 4. Armchair Mode Autonomous AI Director
-  if (isArmchair && state.tickCount % 22 === 0) {
-    runArmchairAiTick(wx);
+  // A gate agent and a ramp crew can work simultaneously. Their work follows sim time.
+  while (state.simMinutes >= state.nextCrewMinute) {
+    state.nextCrewMinute++;
+    if (state.role === "dispatcher" || state.role === "armchair") runGroundCrews(wx);
   }
+  updateReleases(state, wx, playClock.read(), reportDispatch);
+  if (state.role === "armchair" && state.tickCount % 66 === 0) triggerNextDynamicScenario();
 
   syncSignallingBlocks();
   renderAll({ fromTick: true });
@@ -449,6 +438,7 @@ function handleArrival(f, wx) {
     }
 
     f.state = "PARKED";
+    f.parkedAt = "KVEL";
     f.speedKt = 0;
     f.altFt = 5281;
     f.pos = { ...AIRPORTS.KVEL.coords };
@@ -459,11 +449,21 @@ function handleArrival(f, wx) {
       sender: f.callsign,
       message: `Vernal Traffic, ${f.callsign} clear of Runway ${wx.activeRwy} at Alpha, taxiing to ${f.blockId}.`
     });
+    if (f.nextLegDest) {
+      f.origin = "KVEL";
+      f.dest = f.nextLegDest;
+      f.nextLegDest = null;
+      f.schedDep = f.schedArr = "";
+      f.fueled = f.deiced = f.dispatched = false;
+      f.dispatchHeld = false;
+      f.releasedBy = f.divertedFrom = f.releaseDue = null;
+    }
     return;
   }
 
   // Arrived at Basin strip or helipad (74V, U69, 33U, 4V0, UT09, LZ-OURAY, LZ-DINO)
   f.state = "PARKED";
+  f.parkedAt = f.dest;
   f.speedKt = 0;
   f.altFt = AIRPORTS[f.dest]?.elev || 5200;
   f.blockId = f.dest === "UT18" ? "ARMC-PAD" : null;
@@ -474,61 +474,43 @@ function handleArrival(f, wx) {
   });
 }
 
-function runArmchairAiTick(wx) {
-  // Autonomous TSA check-in for pending passengers
-  const pendingPax = state.passengers.find((p) => p.status === "pending");
-  if (pendingPax) {
-    pendingPax.status = pendingPax.correctAction === "clear" ? "cleared" : "resolved";
-    const vte = getFlight("VTE3101");
-    if (vte && vte.tsaClearedPax < vte.tsaTotalPax) vte.tsaClearedPax++;
+function reportDispatch(flight, sender, decision) {
+  emitRadioCall({
+    freq: "129.450", sender,
+    message: `${flight.callsign} · ${decision}.`,
+    logOnly: true
+  });
+}
+
+function runGroundCrews(wx) {
+  const passenger = state.passengers.find(p => p.status === "pending" || p.status === "flagged");
+  if (passenger) {
+    const denied = passenger.correctAction === "deny_boarding";
+    passenger.status = denied ? "denied" : "cleared";
+    const flight = getFlight(passenger.flight.split(" ")[0]);
+    if (flight && !denied && flight.tsaClearedPax < flight.tsaTotalPax) flight.tsaClearedPax++;
     emitRadioCall({
-      freq: "129.450",
-      sender: "KVEL TSA / CONTOUR GATE",
-      message: `AI Agent processed ${pendingPax.name} (${pendingPax.role}): ${pendingPax.correctAction === "clear" ? "Cleared to Gate 1." : "Handled security/hazmat item per FAA protocol."}`
+      freq: "129.450", sender: "KVEL GATE",
+      message: `${flight?.callsign || "Gate 1"} boarding update · ${passenger.name} ${denied ? "will not board" : "cleared"}.`,
+      logOnly: state.role === "dispatcher"
     });
-    return;
   }
 
-  // Autonomous FBO / Dispatch for VTE3101 or N604XJ
-  const readyToPrep = state.flights.find(
-    (f) => ["BOARDING", "PARKED"].includes(f.state) && f.origin === "KVEL" && f.dest !== "KVEL" && (!f.dispatched || !f.fueled || (wx.deiceRequired && !f.deiced))
-  );
-  if (readyToPrep) {
-    if (!readyToPrep.fueled) {
-      readyToPrep.fueled = true;
-      emitRadioCall({
-        freq: "129.450",
-        sender: "VERNAL JET CENTER (FBO)",
-        message: `${readyToPrep.callsign}, Fuel Truck #1 completed Jet-A upload at ${readyToPrep.blockId || "ramp"}.`
-      });
-      return;
-    }
-    if (wx.deiceRequired && !readyToPrep.deiced) {
-      readyToPrep.deiced = true;
-      emitRadioCall({
-        freq: "129.450",
-        sender: "VERNAL JET CENTER DE-ICE",
-        message: `${readyToPrep.callsign}, Type I & Type IV de-ice complete. Holdover time 35 minutes; clear to taxi.`
-      });
-      return;
-    }
-    if (!readyToPrep.dispatched) {
-      readyToPrep.dispatched = true;
-      readyToPrep.state = "TAXI_OUT";
-      readyToPrep.blockId = "TWY-A-S";
-      emitRadioCall({
-        freq: "122.800",
-        sender: readyToPrep.callsign,
-        message: `Vernal Traffic, ${readyToPrep.callsign} released by Dispatch, taxiing from ${readyToPrep.category === "contour" ? "Gate 1" : "Vernal Jet Center"} to Runway ${wx.activeRwy} via Alpha.`
-      });
-      return;
-    }
+  const flight = state.flights.find(f => isDeparture(f) && ["BOARDING", "PARKED"].includes(f.state)
+    && (!f.fueled || (wx.deiceRequired && !f.deiced)));
+  if (!flight) return;
+  const fueling = !flight.fueled;
+  if (fueling) {
+    flight.fueled = true;
+    flight.fuelLbs += 650;
+  } else {
+    flight.deiced = true;
   }
-
-  // Periodically fire dynamic Basin scenario in Armchair Mode
-  if (state.tickCount % 66 === 0) {
-    triggerNextDynamicScenario();
-  }
+  emitRadioCall({
+    freq: "129.450", sender: "VERNAL JET CENTER",
+    message: `${flight.callsign} · ${fueling ? "fueling" : "de-icing"} complete at ${flight.blockId}.`,
+    logOnly: state.role === "dispatcher"
+  });
 }
 
 // ============================================================================
@@ -609,6 +591,7 @@ function triggerNextDynamicScenario() {
     }
   }
 
+  updateReleases(state, getWeather(), playClock.read(), reportDispatch, false);
   syncSignallingBlocks();
   renderAll();
 }
@@ -616,7 +599,11 @@ function triggerNextDynamicScenario() {
 // ============================================================================
 // SVG RENDERER 1: ASHLEY VALLEY & KVEL DLR SIGNALLING DIAGRAM
 // ============================================================================
+let previousSurface = "";
 function renderKvelSvg() {
+  const signature = [state.weatherId, state.selectedFlightId, ...state.blocks.map(b => b.status + ":" + (b.occupant || ""))].join("|");
+  if (signature === previousSurface) return;
+  previousSurface = signature;
   const wx = getWeather();
   const blockColor = (status) => {
     if (status === "occupied") return { fill: "#450a0a", stroke: "#ef4444", text: "#fecaca" };
@@ -684,13 +671,17 @@ function renderKvelSvg() {
     const col = blockColor(b.status);
     const hasFlight = Boolean(b.occupant && getFlight(b.occupant));
     const isSelBlock = hasFlight && b.occupant === state.selectedFlightId;
+    const symbol = { reserved: "◇", occupied: "●", closed: "×" }[b.status];
+    const statusText = b.occupant || b.status.charAt(0).toUpperCase() + b.status.slice(1);
+    const label = symbol && b.w < 40 ? symbol : [symbol, statusText].filter(Boolean).join(" ");
     svg += `
       <g class="signal-block" data-block="${b.id}" ${hasFlight ? `data-flight-id="${b.occupant}" style="cursor:pointer;"` : ""}>
+        <title>${b.label} · ${b.status}${b.occupant ? " · " + b.occupant : ""}</title>
         <rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="4"
           fill="${col.fill}" stroke="${isSelBlock ? "#ffffff" : col.stroke}" stroke-width="${isSelBlock ? 2.5 : b.type === "runway" ? 2.2 : 1.5}"/>
         <text x="${b.x + b.w / 2}" y="${b.y + 13}" text-anchor="middle" fill="${col.text}" font-family="monospace" font-size="8.5" font-weight="700">${b.id}</text>
         <text x="${b.x + b.w / 2}" y="${b.y + b.h - 7}" text-anchor="middle" fill="#cbd5e1" font-family="monospace" font-size="8">
-          ${b.occupant ? "✈ " + b.occupant : b.label.slice(0, 15)}
+          ${escapeHtml(label)}
         </text>
       </g>
     `;
@@ -703,18 +694,12 @@ function renderKvelSvg() {
   `;
 
   dom.kvelSvg.innerHTML = svg;
-  dom.kvelSvg.querySelectorAll(".signal-block[data-flight-id]").forEach((el) => {
-    el.addEventListener("click", () => {
-      state.selectedFlightId = el.dataset.flightId;
-      renderAll();
-    });
-  });
 }
 
 // ============================================================================
 // SVG RENDERER 2: UINTA BASIN REGIONAL AIRSPACE & OFF-MAP PORTALS RADAR
 // ============================================================================
-function renderBasinSvg() {
+function renderBasinBackground() {
   let svg = `
     <rect width="1000" height="620" fill="#050a12"/>
     <!-- Basin Topography Hints -->
@@ -772,7 +757,12 @@ function renderBasinSvg() {
     }
   }
 
-  // Render Live Moving Aircraft Targets
+  dom.basinSvg.innerHTML = svg + '<g class="radar-traffic"></g>';
+}
+
+function renderBasinSvg() {
+  if (!dom.basinSvg.firstElementChild) renderBasinBackground();
+  let svg = "";
   for (const f of state.flights) {
     const isSel = f.id === state.selectedFlightId;
     const isEmg = f.state === "EMERGENCY" || f.squawk === "7700";
@@ -800,41 +790,45 @@ function renderBasinSvg() {
     `;
   }
 
-  dom.basinSvg.innerHTML = svg;
-  dom.basinSvg.querySelectorAll(".radar-target").forEach((el) => {
-    el.addEventListener("click", () => {
-      state.selectedFlightId = el.dataset.flightId;
-      renderAll();
-    });
-  });
+  dom.basinSvg.lastElementChild.innerHTML = svg;
 }
 
 // ============================================================================
 // TRAFFIC TABLE & ROLE WORKSTATIONS
 // ============================================================================
 function renderFlightTable() {
-  dom.opsCountBadge.textContent = `${state.flights.length} ACTIVE OPS • ${state.flights.filter((f) => f.state !== "PARKED" && f.state !== "BOARDING").length} AIRBORNE/TAXI`;
-  dom.flightTableBody.innerHTML = state.flights
-    .map(
-      (f) => `
-      <tr class="${f.id === state.selectedFlightId ? "selected-row" : ""}" data-select-flight="${f.id}" style="cursor:pointer;">
-        <td><strong>${escapeHtml(f.callsign)}</strong><br><span style="color:var(--text-muted);font-size:0.7rem;">${f.tail}</span></td>
-        <td>${escapeHtml(f.type)}<br><span style="color:var(--text-muted);font-size:0.7rem;">${escapeHtml(f.operator)}</span></td>
-        <td><strong>${f.origin} → ${f.dest}</strong><br><span style="color:var(--text-muted);font-size:0.7rem;">ALT: ${f.alternate}</span></td>
-        <td><span class="state-pill state-${f.state}">${f.state}</span><br><span style="color:var(--text-muted);font-size:0.7rem;">${f.blockId || "AIRSPACE"}</span></td>
-        <td>${f.altFt.toLocaleString()}'<br>${f.speedKt} kt</td>
-        <td>${f.squawk}<br><span style="color:var(--accent-cyan);">${f.freq}</span></td>
-      </tr>
-    `
-    )
-    .join("");
-
-  dom.flightTableBody.querySelectorAll("[data-select-flight]").forEach((row) => {
-    row.addEventListener("click", () => {
-      state.selectedFlightId = row.dataset.selectFlight;
-      renderAll();
+  dom.opsCountBadge.textContent = `${state.flights.length} active · ${state.flights.filter(f => !["PARKED","BOARDING"].includes(f.state)).length} airborne or taxiing`;
+  if (!dom.trafficDetails.open) return;
+  // Keep the keyboard-selectable callsign in place while telemetry changes.
+  let index = 0;
+  for (const f of state.flights) {
+    let row = dom.flightTableBody.rows[index++];
+    if (!row || row.dataset.selectFlight !== f.id) {
+      const next = row || null;
+      row = document.createElement("tr");
+      row.dataset.selectFlight = f.id;
+      row.innerHTML = `<td><button type="button" class="flight-pick">${escapeHtml(f.callsign)}</button><br>${escapeHtml(f.tail)}</td>
+        <td>${escapeHtml(f.type)}<br>${escapeHtml(f.operator)}</td><td></td><td></td><td></td><td></td>`;
+      dom.flightTableBody.insertBefore(row, next);
+    }
+    const selected = f.id === state.selectedFlightId;
+    row.classList.toggle("selected-row", selected);
+    row.querySelector("button").setAttribute("aria-pressed", String(selected));
+    const values = [
+      `${f.origin} → ${f.dest}<br>Alt. ${f.alternate}`,
+      `<span class="state-pill state-${f.state}">${f.state}</span><br>${f.blockId || "AIRSPACE"}`,
+      `${f.altFt.toLocaleString()}'<br>${f.speedKt} kt`,
+      `${f.squawk}<br>${f.freq}`
+    ];
+    values.forEach((value, i) => {
+      const cell = row.cells[i + 2];
+      if (cell.dataset.content !== value) {
+        cell.innerHTML = value;
+        cell.dataset.content = value;
+      }
     });
-  });
+  }
+  while (dom.flightTableBody.rows.length > index) dom.flightTableBody.deleteRow(-1);
 }
 
 function renderRoleWorkstation() {
@@ -843,7 +837,7 @@ function renderRoleWorkstation() {
 
   const titles = {
     armchair: ["Armchair Mode — Autonomous AI Director", "AI AUTO: ON"],
-    dispatcher: ["Flight Dispatcher — Contour / Alpine / Exec", "MANUAL DISPATCH"],
+    dispatcher: ["Flight Dispatch", "VERNAL • KVEL"],
     fbo: ["FBO & Ramp Agent — Vernal Jet Center (KVEL)", "RAMP CONTROL"],
     tsa: ["TSA & Airline Ticketing — KVEL Terminal Gate 1", "CHECKPOINT LIVE"],
     pilot: ["Pilot Command — Active Flight Deck", "PILOT IN COMMAND"]
@@ -883,67 +877,7 @@ function renderRoleWorkstation() {
   }
 
   if (state.role === "dispatcher") {
-    const dispatchable = state.flights.filter((f) => ["contour", "cargo", "private_jet"].includes(f.category));
-    dom.roleDeskBody.innerHTML = dispatchable
-      .map(
-        (f) => `
-        <div class="role-card">
-          <h3><span>${escapeHtml(f.callsign)} (${f.type})</span><span class="state-pill state-${f.state}">${f.state}</span></h3>
-          <div style="font-size:0.76rem; font-family:var(--font-mono); color:var(--text-muted); margin-bottom:0.5rem;">
-            Route: <strong>${f.origin} → ${f.dest}</strong> | Alternate: <strong>${f.alternate}</strong> | Fuel: ${f.fuelLbs} lbs<br>
-            Fueled: ${f.fueled ? "✅" : "❌"} | De-Iced: ${f.deiced ? "✅" : wx.deiceRequired ? "⚠️ REQUIRED" : "✅ N/A"} | Released: ${f.dispatched ? "✅" : "⏳ PENDING"}
-          </div>
-          <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
-            <button type="button" class="btn btn-emerald" data-disp-release="${f.id}">Release Flight Plan</button>
-            <button type="button" class="btn btn-amber" data-disp-divert="${f.id}">Divert to ${f.alternate}</button>
-            <button type="button" class="btn" data-disp-hold="${f.id}">Hold for Wx</button>
-          </div>
-        </div>
-      `
-      )
-      .join("");
-
-    dom.roleDeskBody.querySelectorAll("[data-disp-release]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const f = getFlight(btn.dataset.dispRelease);
-        if (!f) return;
-        if (!f.fueled && f.origin === "KVEL") {
-          emitRadioCall({ freq: "129.450", sender: "DISPATCH DESK", message: `Cannot release ${f.callsign}: fuel upload incomplete — request Vernal Jet Center (FBO) fuel truck first!` });
-          return;
-        }
-        if (wx.deiceRequired && !f.deiced && f.origin === "KVEL") {
-          emitRadioCall({ freq: "129.450", sender: "DISPATCH DESK", message: `Cannot release ${f.callsign}: KVEL temp is ${wx.tempC}°C — request FBO Type I/IV de-ice first!` });
-          return;
-        }
-        f.dispatched = true;
-        if (["BOARDING", "PARKED"].includes(f.state)) {
-          f.state = "TAXI_OUT";
-          f.blockId = "TWY-A-S";
-        }
-        emitRadioCall({ freq: "129.450", sender: "FLIGHT DISPATCH", message: `${f.callsign} release signed for ${f.origin}-${f.dest} (Alternate ${f.alternate}), fuel ${f.fuelLbs} lbs verified. Cleared for pushback and taxi.` });
-        renderAll();
-      })
-    );
-    dom.roleDeskBody.querySelectorAll("[data-disp-divert]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const f = getFlight(btn.dataset.dispDivert);
-        if (!f) return;
-        f.dest = f.alternate;
-        f.blockId = null;
-        if (f.state === "APPROACH") f.state = "ENROUTE";
-        emitRadioCall({ freq: "135.775", sender: "FLIGHT DISPATCH", message: `${f.callsign}, amending release due to Uinta Basin weather — divert directly to alternate ${f.alternate}.` });
-        renderAll();
-      })
-    );
-    dom.roleDeskBody.querySelectorAll("[data-disp-hold]").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        const f = getFlight(btn.dataset.dispHold);
-        if (!f) return;
-        f.dispatched = false;
-        emitRadioCall({ freq: "129.450", sender: "FLIGHT DISPATCH", message: `${f.callsign}, holding departure at ${f.origin} pending updated KVEL AWOS visibility report.` });
-        renderAll();
-      })
-    );
+    renderDispatchDesk(dom.dispatchPanel, state, wx, playClock.read());
     return;
   }
 
@@ -1018,6 +952,11 @@ function renderRoleWorkstation() {
       btn.addEventListener("click", () => {
         const f = getFlight(btn.dataset.fboMarshall);
         if (!f) return;
+        if (f.dispatchHeld || f.releaseDue != null) {
+          reportDispatch(f, "RAMP", "awaiting a dispatch release before marshalling");
+          return;
+        }
+        f.parkedAt = null;
         f.state = "TAXI_OUT";
         f.blockId = "TWY-A-S";
         emitRadioCall({ freq: "129.450", sender: "VERNAL JET CENTER", message: `${f.callsign}, chocks pulled, wing-walkers clear — follow marshal to Taxiway Alpha.` });
@@ -1068,7 +1007,7 @@ function renderRoleWorkstation() {
         if (!pax) return;
         const chosen = btn.dataset.tsaAct;
         const ok = chosen === pax.correctAction;
-        pax.status = ok ? "cleared" : "flagged";
+        pax.status = ok ? (chosen === "deny_boarding" ? "denied" : "cleared") : "flagged";
         if (ok && chosen !== "deny_boarding" && vte && vte.tsaClearedPax < vte.tsaTotalPax) {
           vte.tsaClearedPax++;
         }
@@ -1103,6 +1042,7 @@ function renderRoleWorkstation() {
         </label>
         <label style="font-size:0.74rem; font-family:var(--font-mono);">Transponder Squawk
           <select id="pilotSquawkSelect" class="btn" style="width:100%; margin-top:0.2rem;">
+            ${["1200","4215","7700","7600"].includes(sel.squawk) ? "" : `<option value="${escapeHtml(sel.squawk)}" selected>${escapeHtml(sel.squawk)} (assigned)</option>`}
             <option value="1200" ${sel.squawk === "1200" ? "selected" : ""}>1200 (VFR Basin)</option>
             <option value="4215" ${sel.squawk === "4215" ? "selected" : ""}>4215 (IFR ZLC)</option>
             <option value="7700" ${sel.squawk === "7700" ? "selected" : ""}>7700 (EMERGENCY)</option>
@@ -1112,7 +1052,7 @@ function renderRoleWorkstation() {
       </div>
       <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
         <button type="button" class="btn btn-emerald" id="pilotLaunchBtn">🛫 Taxi / Takeoff / Fly to Dest</button>
-        <button type="button" class="btn" id="pilotPatternBtn">🔄 Fly KVEL Rwy 35 Pattern</button>
+        <button type="button" class="btn" id="pilotPatternBtn">🔄 Fly KVEL Rwy ${wx.activeRwy} Pattern</button>
         <button type="button" class="btn btn-amber" id="pilotCtafBtn">📻 Announce Position on CTAF</button>
         <button type="button" class="btn btn-crimson" id="pilotMaydayBtn">🚨 Declare 7700 Emergency</button>
       </div>
@@ -1137,22 +1077,20 @@ function renderRoleWorkstation() {
     renderAll();
   });
   document.getElementById("pilotLaunchBtn")?.addEventListener("click", () => {
-    if (sel.state === "PARKED" || sel.state === "BOARDING") {
-      // Find nearest airport if parked away from origin
-      const atKvel = Boolean(sel.blockId && ["GATE-1", "FBO-1", "FBO-2", "CARGO-PAD", "GA-HANGAR"].includes(sel.blockId));
-      const currentCode = atKvel ? "KVEL" : sel.dest;
-      if (sel.dest === currentCode && !atKvel) {
-        emitRadioCall({
-          freq: sel.freq,
-          sender: sel.callsign,
-          message: `Select a new destination airport or LZ before departing ${currentCode}.`
-        });
-        return;
-      }
-      if (!atKvel) sel.origin = currentCode;
+    if (sel.dispatchHeld || sel.releaseDue != null) {
+      reportDispatch(sel, "DISPATCH DESK", "awaiting dispatch release before departure");
+      return;
     }
+    const currentCode = ["PARKED", "BOARDING"].includes(sel.state) ? sel.parkedAt : null;
+    if (currentCode && sel.dest === currentCode) {
+      emitRadioCall({ freq: sel.freq, sender: sel.callsign, message: `Select a new destination before departing ${currentCode}.` });
+      return;
+    }
+    if (currentCode) sel.origin = currentCode;
+    const isKvelRamp = currentCode === "KVEL";
+    sel.parkedAt = null;
+    sel.releaseDue = null;
     sel.dispatched = true;
-    const isKvelRamp = Boolean(sel.blockId && ["GATE-1", "FBO-1", "FBO-2", "CARGO-PAD", "GA-HANGAR"].includes(sel.blockId));
     sel.state = isKvelRamp ? "TAXI_OUT" : "ENROUTE";
     if (sel.state === "ENROUTE") {
       sel.blockId = null;
@@ -1164,12 +1102,17 @@ function renderRoleWorkstation() {
     emitRadioCall({
       freq: "122.800",
       sender: sel.callsign,
-      message: `Vernal Traffic, ${sel.callsign} departing for ${sel.dest} (${AIRPORTS[sel.dest]?.name || sel.dest}).`
+      message: `${sel.origin} Traffic, ${sel.callsign} departing for ${sel.dest} (${AIRPORTS[sel.dest]?.name || sel.dest}).`
     });
     syncSignallingBlocks();
     renderAll();
   });
   document.getElementById("pilotPatternBtn")?.addEventListener("click", () => {
+    if (sel.dispatchHeld || sel.releaseDue != null) {
+      reportDispatch(sel, "DISPATCH DESK", "awaiting dispatch release before departure");
+      return;
+    }
+    sel.parkedAt = null;
     sel.dest = "KVEL";
     sel.state = "PATTERN";
     sel.blockId = "PAT-DOWNWIND";
@@ -1236,6 +1179,11 @@ function renderRadioLog() {
 function renderHeaderAndWeather() {
   const wx = getWeather();
   dom.simClock.textContent = formatSimTime(state.simMinutes);
+  if (state.role === "dispatcher") {
+    const label = "Vernal " + (state.surfaceDetail ? "airfield" : "and Ashley Valley") +
+      " · " + (state.rwyClosedTicks > 0 ? "Runway closed" : "Runway " + wx.activeRwy + " active");
+    if (label !== dom.dispatchMapLabel.textContent) dom.dispatchMapLabel.textContent = label;
+  }
   dom.flightCatBadge.textContent = wx.flightCategory;
   dom.flightCatBadge.className = `flight-cat-badge cat-${wx.flightCategory}`;
   dom.metarText.textContent = wx.metar;
@@ -1270,16 +1218,13 @@ function renderAirportDirectory() {
 
 function renderAll({ fromTick = false } = {}) {
   renderHeaderAndWeather();
-  renderKvelSvg();
-  renderBasinSvg();
+  if (state.view !== "basin") renderKvelSvg();
+  if (state.view !== "kvel") renderBasinSvg();
   renderFlightTable();
   // Avoid clobbering open <select>/<input> controls inside the role desk during background ticks
   const active = document.activeElement;
-  const interactingWithDeskInput =
-    fromTick &&
-    active &&
-    dom.roleDeskBody.contains(active) &&
-    ["SELECT", "INPUT", "TEXTAREA"].includes(active.tagName);
+  const interactingWithDeskInput = fromTick && state.role !== "dispatcher" &&
+    active && dom.roleDeskBody.contains(active) && active.matches("select,input,textarea");
   if (!interactingWithDeskInput) {
     renderRoleWorkstation();
   }
@@ -1288,34 +1233,133 @@ function renderAll({ fromTick = false } = {}) {
 // ============================================================================
 // EVENT LISTENERS & BOOTSTRAP
 // ============================================================================
-document.querySelectorAll("[data-speed]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.speed = Number(btn.dataset.speed);
-    document.querySelectorAll("[data-speed]").forEach((b) => b.classList.toggle("active", b === btn));
+function setSpeed(speed) {
+  playClock.setRunning(speed !== 0);
+  state.speed = speed;
+  document.querySelectorAll("[data-speed]").forEach(button => {
+    const active = Number(button.dataset.speed) === speed;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
+  if (state.role === "dispatcher") renderDispatchDesk(dom.dispatchPanel, state, getWeather(), playClock.read());
+}
+
+function setView(view) {
+  state.view = view;
+  for (const button of document.querySelectorAll("[data-view]")) {
+    const active = button.dataset.view === view;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  dom.diagramsContainer.classList.toggle("split-view", view === "split");
+  dom.kvelSchematicBox.hidden = view === "basin";
+  dom.basinRadarBox.hidden = view === "kvel";
+}
+
+function setSurfaceExtent() {
+  const dispatch = state.role === "dispatcher";
+  const closeUp = dispatch && state.surfaceDetail;
+  dom.kvelSvg.setAttribute("viewBox", closeUp ? "325 140 355 358" : "0 0 920 565");
+  dom.kvelSvg.classList.toggle("airfield-detail", closeUp);
+  dom.surfaceExtent.hidden = dom.dispatchMapLabel.hidden = !dispatch;
+  dom.surfaceExtent.textContent = closeUp ? "Show full valley" : "Show airfield detail";
+}
+dom.surfaceExtent.addEventListener("click", () => {
+  state.surfaceDetail = !state.surfaceDetail;
+  setSurfaceExtent();
+  renderHeaderAndWeather();
 });
 
-document.querySelectorAll("[data-role]").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    state.role = tab.dataset.role;
-    document.querySelectorAll("[data-role]").forEach((t) => t.setAttribute("aria-selected", String(t === tab)));
-    renderRoleWorkstation();
-  });
-});
+let viewOutsideDispatch = "split";
+let dispatchView = "kvel";
+function setRole(role) {
+  const wasDispatch = state.role === "dispatcher";
+  const dispatch = role === "dispatcher";
+  if (wasDispatch !== dispatch) {
+    if (dispatch) {
+      viewOutsideDispatch = state.view;
+      dom.workspace.prepend(dom.workstation);
+      setView(dispatchView);
+    } else {
+      dispatchView = state.view;
+      dom.workspace.append(dom.workstation);
+      setView(viewOutsideDispatch);
+    }
+    dom.workspace.classList.toggle("dispatch-mode", dispatch);
+    dom.dispatchPanel.hidden = !dispatch;
+    dom.roleDeskBody.hidden = dispatch;
+    dom.trafficDetails.open = !dispatch;
+  }
+  state.role = role;
+  setSurfaceExtent();
+  for (const tab of document.querySelectorAll("[data-role]")) {
+    const active = tab.dataset.role === role;
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  }
+  updateReleases(state, getWeather(), playClock.read(), reportDispatch, false);
+  renderAll();
+}
 
-document.querySelectorAll("[data-view]").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.view = btn.dataset.view;
-    document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b === btn));
-    dom.diagramsContainer.classList.toggle("split-view", state.view === "split");
-    dom.kvelSchematicBox.style.display = state.view === "basin" ? "none" : "block";
-    dom.basinRadarBox.style.display = state.view === "kvel" ? "none" : "block";
+const roleTabs = [...document.querySelectorAll("[data-role]")];
+for (const [index, tab] of roleTabs.entries()) {
+  tab.addEventListener("click", () => setRole(tab.dataset.role));
+  tab.addEventListener("keydown", e => {
+    const target = { ArrowLeft: (index + roleTabs.length - 1) % roleTabs.length,
+      ArrowRight: (index + 1) % roleTabs.length, Home: 0, End: roleTabs.length - 1 }[e.key];
+    if (target === undefined) return;
+    e.preventDefault();
+    roleTabs[target].focus();
+    setRole(roleTabs[target].dataset.role);
   });
+}
+
+for (const button of document.querySelectorAll("[data-speed]")) {
+  button.addEventListener("click", () => setSpeed(Number(button.dataset.speed)));
+}
+for (const button of document.querySelectorAll("[data-view]")) {
+  button.addEventListener("click", () => { setView(button.dataset.view); renderAll(); });
+}
+
+dom.workspace.addEventListener("click", event => {
+  const target = event.target.closest("[data-dispatch-flight],[data-select-flight],[data-flight-id]");
+  if (!target) return;
+  state.selectedFlightId = target.dataset.dispatchFlight || target.dataset.selectFlight || target.dataset.flightId;
+  renderAll();
+});
+dom.trafficDetails.addEventListener("toggle", renderFlightTable);
+dom.dispatchPanel.addEventListener("click", event => {
+  const action = event.target.closest("[data-dispatch-action]");
+  if (!action || action.getAttribute("aria-disabled") === "true") return;
+  const flight = getFlight(state.selectedFlightId);
+  if (!flight) return;
+  const needs = departureNeeds(flight, getWeather(), state.passengers);
+  switch (action.dataset.dispatchAction) {
+    case "release":
+      if (!releaseFlight(flight, needs, "You")) return;
+      reportDispatch(flight, "YOUR DISPATCH DESK", "released for departure");
+      break;
+    case "hold":
+      if (!holdDeparture(flight)) return;
+      reportDispatch(flight, "YOUR DISPATCH DESK", "hold acknowledged, crew holding position until your release");
+      break;
+    case "divert":
+      if (!divertFlight(flight)) return;
+      reportDispatch(flight, "YOUR DISPATCH DESK", "diverting to " + flight.dest);
+      break;
+  }
+  syncSignallingBlocks();
+  renderAll();
 });
 
 dom.weatherSelect.addEventListener("change", (e) => {
   state.weatherId = e.target.value;
   const wx = getWeather();
+  for (const f of state.flights) {
+    if (["FINAL-17", "RNAV-35-FINAL"].includes(f.blockId)) f.blockId = wx.activeRwy === "17" ? "FINAL-17" : "RNAV-35-FINAL";
+  }
+  updateReleases(state, wx, playClock.read(), reportDispatch, false);
+  syncSignallingBlocks();
   emitRadioCall({
     freq: "135.225",
     sender: "KVEL AWOS-3PT",
@@ -1337,7 +1381,13 @@ dom.clearLogBtn.addEventListener("click", () => {
 dom.resetSimBtn?.addEventListener("click", () => {
   state.simMinutes = 7 * 60 + 5;
   state.blocks = KVEL_BLOCKS.map((b) => ({ ...b }));
-  state.flights = INITIAL_FLIGHTS.map((f) => ({ ...f, pos: { ...f.pos } }));
+  state.flights = initialFleet(getWeather().activeRwy);
+  playClock.reset(state.speed !== 0);
+  state.nextCrewMinute = state.simMinutes + 1;
+  state.radioLog = [];
+  for (const toast of [...activeToasts]) dismissToast(toast, false);
+  dom.flightTableBody.replaceChildren();
+  dom.dispatchPanel.querySelector(".dispatch-roster").replaceChildren();
   state.passengers = PASSENGER_QUEUE.map((p) => ({ ...p }));
   state.rwyClosedTicks = 0;
   state.rwyCloseReason = "";
@@ -1359,16 +1409,18 @@ document.addEventListener("keydown", (e) => {
   const tag = document.activeElement?.tagName;
   if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(tag)) return;
   e.preventDefault();
-  state.speed = state.speed === 0 ? 1 : 0;
-  document.querySelectorAll("[data-speed]").forEach((b) =>
-    b.classList.toggle("active", Number(b.dataset.speed) === state.speed)
-  );
+  setSpeed(state.speed === 0 ? 1 : 0);
 });
 
 // MANDATORY per dialog guide: read and reset dialog.returnValue on close
 dom.airportDialog.addEventListener("close", () => {
   dom.airportDialog.returnValue = "";
 });
+
+// Retain the local directory and radio controls on browsers without invoker commands.
+if (!("commandForElement" in HTMLButtonElement.prototype)) {
+  document.getElementById("openDirectoryBtn").addEventListener("click", () => dom.airportDialog.showModal());
+}
 
 // Track last focused non-toast element for accessible focus restoration
 document.addEventListener("focusin", (e) => {
@@ -1380,12 +1432,15 @@ document.addEventListener("focusin", (e) => {
 // Initialize
 renderAirportDirectory();
 syncSignallingBlocks();
-renderAll();
-
+setSpeed(1);
+setView("split");
+setRole(location.hash === "#dispatch" ? "dispatcher" : "armchair");
 emitRadioCall({
-  freq: "122.800",
-  sender: "VERNAL REGIONAL OPS (KVEL)",
-  message: "Welcome to Uinta Basin Air Ops Simulator. Armchair AI Director is live — watch Ashley Valley signalling blocks, or switch roles above to take over Dispatch, FBO, TSA, or Pilot Command."
+  freq: "122.800", sender: "VERNAL REGIONAL OPS (KVEL)",
+  message: state.role === "dispatcher"
+    ? "Dispatch on duty. Gate and ramp crews will report when flights are ready for release."
+    : "Vernal Regional online. The Armchair Director has the field. Select a desk to take over.",
+  logOnly: state.role === "dispatcher"
 });
 
 setInterval(stepSimulation, 900);

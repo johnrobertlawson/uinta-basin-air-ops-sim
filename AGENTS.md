@@ -14,6 +14,7 @@
 | `styles.css` | Dark DLR signalling theme, popover toast transitions, `content-visibility: auto` board columns, modal styles, WCAG reflow/reduced-motion. |
 | `data.js` | Static domain data: `AIRPORTS`, `KVEL_BLOCKS`, `WEATHER_REGIMES`, `INITIAL_FLIGHTS`, `PASSENGER_QUEUE`, `DYNAMIC_SCENARIOS`. |
 | `app.js` | Simulation loop (`900ms` tick), DLR block sync, Armchair AI Director, radio popover toast manager, dual SVG renderers, 5 role workstations. |
+| `dispatch.js` / `dispatch-desk.js` | Shared departure decisions and unpaused relief clock / keyboard-selectable flight strips and crew reports. |
 | `VERSION` | Single source of truth (`MAJOR.MINOR.PATCH`) read by `scripts/build_packages.py` and mirrored in `index.html`. |
 | `scripts/launcher.py` | Zero-dependency Python 3 stdlib local server (`127.0.0.1:8742` or free port) + browser opener. |
 | `scripts/build_packages.py` | Builds `dist/Uinta-Basin-Air-Ops-Sim-<VER>-macOS.pkg` and `dist/uinta-basin-air-ops-sim_<VER>_all.deb`. |
@@ -27,11 +28,15 @@
    - Never use volatile/experimental CSS `scroll-axis-lock` without explicit user opt-in.
 4. **Runway consistency:** Always derive active runway (`17` or `35`) from `getWeather().activeRwy`; never hardcode `35` in hold-short, pattern, or missed-approach logic.
 5. **Versioning:** When bumping a release, update `VERSION` and the header badge in `index.html`, then tag `v<VERSION>`.
+6. **Dispatch:** A ready flight requests release once per readiness period. Use unpaused real milliseconds for relief in every speed mode. An explicit hold survives role changes until the dispatcher releases it. Requests go to the strip and written log.
 
 ## Verification & Packaging
 ```bash
-# 1. Syntax check
-node --check data.js && node --check app.js
+# 1. Check browser modules and run Dispatch tests (Node 20.10+)
+for module in data.js app.js dispatch.js dispatch-desk.js; do
+  node --experimental-default-type=module --check "$module" || exit 1
+done
+node --experimental-default-type=module --test tests/dispatch.test.mjs
 
 # 2. Run locally
 python3 scripts/launcher.py

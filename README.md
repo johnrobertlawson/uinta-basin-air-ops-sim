@@ -38,7 +38,7 @@ Artifacts are written to `dist/` using the version in `VERSION`.
 ## Included Roles & Modes
 
 - **Armchair AI Director**: Full autonomous AI characters across Dispatch, FBO/Ramp, TSA/Ticketing, Pilots, Salt Lake Center (`135.775`), CTAF (`122.800`), Vernal Jet Center (`129.450`), and Guard (`121.500`), with unobtrusive written radio call popups and a permanent transcript log.
-- **Flight Dispatcher**: Release, hold, or divert Contour Airlines CRJ-200 (`VTE`), Alpine Air Express Beech 1900D/99 (`AIP`), and executive jets (`N604XJ`).
+- **Flight Dispatcher**: Select **Flight Dispatcher** or open `/#dispatch` on the local server. Flight strips lead the desk with the Vernal airfield alongside. Gate and ramp crews handle passenger processing, fuel, and de-icing. A ready departure marks its strip and calls once in the written log. After 60 seconds of unpaused play, a relief dispatcher can release an unanswered flight at any simulation speed. A hold stays in force until you release it. Select an airborne flight to divert it to its filed alternate.
 - **FBO & Ramp Agent (Vernal Jet Center)**: Jet-A/100LL fueling, Type I/IV glycol de-icing, marshalling to Taxiway Alpha, and Runway 17/35 wildlife/FOD sweeps.
 - **TSA & Airline Ticketing**: Screen realistic Uinta Basin passengers (Book Cliffs hunters, USU Bingham Research Center snow-depth sensor gear, directional drillers, river guides, and late/unmanifested hazmat edge cases).
 - **Pilot Command**: Fly Contour jets, private light jets, Alpine cargo turboprops, Classic Air Medevac (`UT18`/`UT09`), Uintah SAR (`LZ-DINO`), methane leak survey patrols (`LZ-OURAY`), or CNCC/USU student patterns.

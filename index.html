@@ -69,7 +69,7 @@
       <button type="button" class="role-tab" role="tab" aria-selected="false" data-role="pilot">✈️ Pilot Command</button>
     </div>
 
-    <div style="display: flex; gap: 0.35rem; align-items: center;">
+    <div class="map-picker">
       <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">MAP:</span>
       <button type="button" class="btn active" data-view="split">Dual Split</button>
       <button type="button" class="btn" data-view="kvel">Ashley Valley / KVEL</button>
@@ -95,8 +95,10 @@
         <!-- View A: High-Detail Ashley Valley & KVEL DLR Signalling Diagram -->
         <div id="kvelSchematicBox" class="schematic-box">
           <div class="schematic-caption">
-            <span><strong>KVEL ASHLEY VALLEY SIGNALLING BOARD</strong> • RWY 17/35 (6,198'×100')</span>
-            <span style="color: var(--accent-cyan);">CTAF 122.800 • FBO 129.450</span>
+            <span class="valley-caption"><strong>KVEL ASHLEY VALLEY SIGNALLING BOARD</strong> • RWY 17/35 (6,198'×100')</span>
+            <span class="valley-caption" style="color: var(--accent-cyan);">CTAF 122.800 • FBO 129.450</span>
+            <strong id="dispatchMapLabel" hidden></strong>
+            <button type="button" id="surfaceExtent" class="btn" hidden>Show full valley</button>
           </div>
           <svg id="kvelSvg" class="schematic-svg" viewBox="0 0 920 565" role="img" aria-label="Ashley Valley and Vernal Regional Airport KVEL DLR-style signalling diagram"></svg>
         </div>
@@ -113,11 +115,11 @@
 
       <!-- Active Basin Flights Table -->
       <div style="padding: 0 0.65rem 0.65rem 0.65rem;">
-        <div class="role-card">
-          <h3>
-            <span>Active Operations Strip Board (Click any flight to inspect / command)</span>
+        <details class="role-card" id="trafficDetails" open>
+          <summary>
+            <span>All basin traffic</span>
             <span id="opsCountBadge" style="font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent-cyan);"></span>
-          </h3>
+          </summary>
           <div class="flight-table-wrap">
             <table class="sim-table">
               <thead>
@@ -133,18 +135,32 @@
               <tbody id="flightTableBody"></tbody>
             </table>
           </div>
-        </div>
+        </details>
       </div>
     </section>
 
     <!-- Right Board Column: Active Role Workstation + Persistent Radio Transcript Log -->
-    <aside class="board-column" aria-label="Role Workstation and Radio Log">
+    <aside class="board-column" id="workstation" aria-label="Role Workstation and Radio Log">
       <div class="panel-header">
         <h2 id="rolePanelTitle" class="panel-title">Armchair Mode — Autonomous AI Director</h2>
         <span id="roleAiBadge" class="dlr-badge" style="font-size:0.68rem;">AI AUTO: ON</span>
       </div>
 
       <div id="roleDeskBody" class="role-desk-body"></div>
+      <section id="dispatchPanel" aria-labelledby="stripsTitle" hidden>
+        <h3 id="stripsTitle">Flight strips</h3>
+        <div class="dispatch-roster" role="group" aria-label="Select a dispatch flight"></div>
+        <div class="dispatch-detail">
+          <div class="dispatch-detail-heading"><h3 class="dispatch-flight-title"></h3><span class="dispatch-decision-state"></span></div>
+          <p class="dispatch-route-detail"></p>
+          <p class="dispatch-report"></p>
+          <div class="dispatch-actions" role="group" aria-label="Dispatch decisions">
+            <button type="button" class="btn btn-emerald" data-dispatch-action="release">Release flight</button>
+            <button type="button" class="btn btn-amber" data-dispatch-action="hold">Hold departure</button>
+            <button type="button" class="btn" data-dispatch-action="divert">Divert to alternate</button>
+          </div>
+        </div>
+      </section>
 
       <!-- Persistent Radio Transcript Log (ensures toast info is permanently accessible) -->
       <div style="padding: 0 0.75rem 0.75rem 0.75rem;">

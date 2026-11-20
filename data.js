@@ -7,6 +7,7 @@
 export const AIRPORTS = {
   KVEL: {
     code: "KVEL",
+    shortName: "Vernal",
     name: "Vernal Regional Airport",
     region: "Ashley Valley (Main Hub)",
     elev: 5281,
@@ -22,6 +23,7 @@ export const AIRPORTS = {
   },
   "74V": {
     code: "74V",
+    shortName: "Roosevelt",
     name: "Roosevelt Municipal Airport",
     region: "Central Uinta Basin",
     elev: 5176,
@@ -34,6 +36,7 @@ export const AIRPORTS = {
   },
   U69: {
     code: "U69",
+    shortName: "Duchesne",
     name: "Duchesne Municipal Airport",
     region: "Western Uinta Basin",
     elev: 5833,
@@ -45,6 +48,7 @@ export const AIRPORTS = {
   },
   "33U": {
     code: "33U",
+    shortName: "Dutch John",
     name: "Dutch John Airport",
     region: "Flaming Gorge / North Uintas",
     elev: 6561,
@@ -56,6 +60,7 @@ export const AIRPORTS = {
   },
   "4V0": {
     code: "4V0",
+    shortName: "Rangely",
     name: "Rangely Airport",
     region: "Eastern Basin (Colorado)",
     elev: 5278,
@@ -69,6 +74,7 @@ export const AIRPORTS = {
   // Helipads & Special Basin Operations Zones
   UT18: {
     code: "UT18",
+    shortName: "Ashley Regional",
     name: "Ashley Regional Medical Center Helipad",
     region: "Vernal City (150 W 100 N)",
     elev: 5320,
@@ -80,6 +86,7 @@ export const AIRPORTS = {
   },
   UT09: {
     code: "UT09",
+    shortName: "Uintah Basin Medical Center",
     name: "Uintah Basin Medical Center Helipad",
     region: "Roosevelt (250 W 300 N)",
     elev: 5115,
@@ -91,6 +98,7 @@ export const AIRPORTS = {
   },
   "LZ-OURAY": {
     code: "LZ-OURAY",
+    shortName: "Ouray",
     name: "Ouray / Leland Bench Gas Field & Ozone Site",
     region: "White & Green River Confluence",
     elev: 4680,
@@ -102,6 +110,7 @@ export const AIRPORTS = {
   },
   "LZ-DINO": {
     code: "LZ-DINO",
+    shortName: "Dinosaur LZ",
     name: "Dinosaur NM / Split Mountain & Gates of Lodore LZ",
     region: "Green River Canyons",
     elev: 4850,
@@ -114,6 +123,7 @@ export const AIRPORTS = {
   // Minor Outer-Ring Airports (On Map)
   KPUC: {
     code: "KPUC",
+    shortName: "Price",
     name: "Carbon County Regional / Buck Davis Field (Price)",
     region: "Castle Country (SW across Tavaputs)",
     elev: 5957,
@@ -125,6 +135,7 @@ export const AIRPORTS = {
   },
   KRKS: {
     code: "KRKS",
+    shortName: "Rock Springs",
     name: "Southwest Wyoming Regional (Rock Springs)",
     region: "Sweetwater County, WY (North)",
     elev: 6765,
@@ -136,6 +147,7 @@ export const AIRPORTS = {
   },
   KGJT: {
     code: "KGJT",
+    shortName: "Grand Junction",
     name: "Grand Junction Regional Airport",
     region: "Western Slope, CO (Southeast)",
     elev: 4858,
@@ -147,6 +159,7 @@ export const AIRPORTS = {
   },
   KSPK: {
     code: "KSPK",
+    shortName: "Spanish Fork",
     name: "Spanish Fork Municipal / Woodhouse Field",
     region: "Southern Utah Valley (West Boundary)",
     elev: 4529,
@@ -159,6 +172,7 @@ export const AIRPORTS = {
   // Off-Map Portals (Planes enter/exit at border gates)
   KSLC: {
     code: "KSLC",
+    shortName: "Salt Lake City",
     name: "Salt Lake City Int'l [OFF-MAP WEST PORTAL]",
     region: "Via Daniels Summit V200 / MYTON",
     elev: 4227,
@@ -170,6 +184,7 @@ export const AIRPORTS = {
   },
   KDEN: {
     code: "KDEN",
+    shortName: "Denver",
     name: "Denver Int'l [OFF-MAP EAST PORTAL]",
     region: "Via Meeker J60 / Rockies",
     elev: 5434,
@@ -181,6 +196,7 @@ export const AIRPORTS = {
   },
   KPHX: {
     code: "KPHX",
+    shortName: "Phoenix",
     name: "Phoenix Sky Harbor [OFF-MAP SOUTH PORTAL]",
     region: "Via Moab / Page J15",
     elev: 1135,
@@ -222,6 +238,7 @@ export const KVEL_BLOCKS = [
   { id: "PAT-DOWNWIND", label: "East Downwind (Split Mtn View)", type: "air", x: 725, y: 275, w: 112, h: 52, status: "clear", occupant: null },
   { id: "PAT-BASE", label: "Base Leg (Ashley Creek)", type: "air", x: 700, y: 445, w: 108, h: 44, status: "clear", occupant: null },
   { id: "RNAV-35-FINAL", label: "RNAV Rwy 35 Final (JENSE 4nm)", type: "air", x: 556, y: 500, w: 106, h: 46, status: "clear", occupant: null },
+  { id: "FINAL-17", label: "Runway 17 final", type: "air", x: 556, y: 10, w: 106, h: 44, status: "clear", occupant: null },
   { id: "ASPHALT-RIDGE", label: "Asphalt Ridge West Departure", type: "air", x: 185, y: 365, w: 118, h: 48, status: "clear", occupant: null },
   { id: "ARMC-PAD", label: "UT18 Ashley Reg. Med Ctr Pad", type: "heli", x: 205, y: 155, w: 115, h: 46, status: "clear", occupant: null }
 ];

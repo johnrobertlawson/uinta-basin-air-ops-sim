@@ -21,7 +21,7 @@ DIST_DIR = ROOT / "dist"
 PKG_NAME = "uinta-basin-air-ops-sim"
 APP_DISPLAY_NAME = "Uinta Basin Air Ops Sim"
 BUNDLE_ID = "io.github.johnrobertlawson.uinta-basin-air-ops-sim"
-WEB_FILES = ["index.html", "styles.css", "app.js", "data.js", "VERSION"]
+WEB_FILES = ["index.html", "styles.css", "app.js", "data.js", "dispatch.js", "dispatch-desk.js", "VERSION"]
 
 
 def read_version() -> str:
